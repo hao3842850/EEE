@@ -2596,7 +2596,7 @@ def get_finance_flex(rtype, amount, note, summary):
           {"type": "separator", "margin": "xxl"},
           # --- 底部統計區塊優化 ---
           {"type": "box", "layout": "vertical", "margin": "md", "backgroundColor": "#F7F7F7", "paddingAll": "md", "cornerRadius": "sm", "contents": [
-              {"type": "text", "text": "📊 國庫即時報表", "size": "xs", "weight": "bold", "color": "#555555", "margin": "xs"},
+              {"type": "text", "text": "📊 城鑽即時報表", "size": "xs", "weight": "bold", "color": "#555555", "margin": "xs"},
               {"type": "text", "text": "\n".join(details), "size": "xs", "color": "#888888", "wrap": True, "lineSpacing": "4px"}
           ]}
         ]
