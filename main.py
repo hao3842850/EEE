@@ -2600,14 +2600,14 @@ def send_finance_report(event, summary_text):
         "layout": "vertical",
         "contents": [
           {"type": "text", "text": "🛡️ 城堡財政部", "weight": "bold", "color": "#8B4513", "size": "sm"},
-          {"type": "text", "text": "國庫財務報表", "weight": "bold", "size": "xl", "margin": "md"},
+          {"type": "text", "text": "城堡財務報表", "weight": "bold", "size": "xl", "margin": "md"},
           {"type": "separator", "margin": "lg"},
           {"type": "box", "layout": "vertical", "margin": "lg", "contents": [
               {"type": "text", "text": "當前詳細統計：", "size": "xs", "color": "#888888", "margin": "sm"},
               {"type": "text", "text": summary_text, "size": "sm", "wrap": True, "margin": "md", "lineSpacing": "5px"}
           ]},
           {"type": "box", "layout": "vertical", "margin": "xl", "paddingAll": "md", "backgroundColor": "#F8F8F8", "contents": [
-              {"type": "text", "text": "⚠️ 提醒：請大臣務必據實申報。", "size": "xxs", "color": "#aaaaaa", "align": "center"}
+              {"type": "text", "text": "⚠️ 提醒：請務必確實登記。", "size": "xxs", "color": "#aaaaaa", "align": "center"}
           ]}
         ]
       }
@@ -2700,22 +2700,38 @@ def handle_message(event):
     # --- 城堡財務功能 ---
     # 指令範例：稅收 10000 亞丁稅收
     # 城堡財務紀錄
-    if msg.startswith("收入") or msg.startswith("支出"):
+    if msg.startswith("收入") or msg.startswith("支出") or msg.startswith("稅收"):
         parts = msg.split()
-    
-        rtype = "收入" if msg.startswith("收入") else "支出"
+        
+        # 1. 修正類型判斷邏輯
+        if msg.startswith("收入"):
+            rtype = "收入"
+        elif msg.startswith("稅收"):
+            rtype = "稅收"
+        else:
+            rtype = "支出"
+
         try:
-            amount = int(parts[1])
+            # 取得金額並轉為整數
+            raw_amount = int(parts[1])
+            
+            # 2. 自動處理正負值 (讓資料庫統計更直覺)
+            # 如果是支出且使用者輸入正數，我們可以考慮將其存為負值，或是由 save_finance_record 處理
+            amount = -abs(raw_amount) if rtype == "支出" else abs(raw_amount)
+            
             note = parts[2] if len(parts) > 2 else "無備註"
             gid = event.source.group_id if event.source.type == 'group' else event.source.user_id
             uid = event.source.user_id
 
+            # 3. 儲存並回覆
             if save_finance_record(gid, rtype, amount, note, uid):
                 summary = get_finance_summary(gid)
-                flex_msg = get_finance_flex(rtype, amount, note, summary)
+                # 使用我們之前設計的美化 Flex Card
+                flex_msg = get_finance_flex(rtype, abs(amount), note, summary) 
                 line_bot_api.reply_message(event.reply_token, flex_msg)
-        except ValueError:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 金額請輸入數字"))
+                
+        except (ValueError, IndexError):
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 格式錯誤！請輸入：[收入/支出] [金額] [備註]"))
         return
 
     # 查詢指令
