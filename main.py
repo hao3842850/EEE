@@ -2513,51 +2513,47 @@ def roster_delete(user_id):
                 (user_id,)
             )
         conn.commit()
-# 新增財務紀錄到資料庫
-def save_finance_record(group_id, record_type, amount, note, user_id):
+def save_finance_record(group_id, r_type, amount, note, user_id):
     conn = get_pg_conn()
     if not conn: return False
     try:
         cur = conn.cursor()
-        query = """
+        # 建立表 (如果還不存在)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS castle_finance (
+                id SERIAL PRIMARY KEY,
+                group_id TEXT,
+                record_type TEXT,
+                amount INTEGER,
+                note TEXT,
+                user_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # 寫入資料
+        cur.execute("""
             INSERT INTO castle_finance (group_id, record_type, amount, note, user_id)
             VALUES (%s, %s, %s, %s, %s)
-        """
-        cur.execute(query, (group_id, record_type, amount, note, user_id))
+        """, (group_id, r_type, amount, note, user_id))
         conn.commit()
         return True
     except Exception as e:
-        print(f"財務紀錄失敗: {e}")
+        print(f"財務紀錄出錯: {e}")
         return False
     finally:
-        cur.close()
         conn.close()
 
-# 取得目前餘額與財務摘要
 def get_finance_summary(group_id):
     conn = get_pg_conn()
     if not conn: return "無法連線資料庫"
     try:
         cur = conn.cursor()
-        query = """
-            SELECT record_type, SUM(amount) 
-            FROM castle_finance 
-            WHERE group_id = %s 
-            GROUP BY record_type
-        """
-        cur.execute(query, (group_id,))
+        cur.execute("SELECT record_type, SUM(amount) FROM castle_finance WHERE group_id = %s GROUP BY record_type", (group_id,))
         rows = cur.fetchall()
-        
-        income = 0
-        expense = 0
-        for r_type, total in rows:
-            if r_type == '稅收': income = total
-            else: expense = total
-            
-        balance = income - expense
-        return f"🏰 城堡財務報表\n💰 總稅收：{income}\n💸 總支出：{expense}\n⚖️ 庫存餘額：{balance}"
+        income = sum(amt for rtype, amt in rows if rtype == "稅收")
+        expense = sum(amt for rtype, amt in rows if rtype == "支出")
+        return f"🏰 城堡財政摘要\n💰 總稅收：{income}\n💸 總支出：{expense}\n⚖️ 庫存：{income - expense}"
     finally:
-        cur.close()
         conn.close()
 # FastAPI Webhook
 @app.on_event("startup")
@@ -2641,26 +2637,26 @@ def handle_message(event):
 
     # --- 城堡財務功能 ---
     # 指令範例：+稅收 10000 亞丁稅收
+    # 城堡財務紀錄
     if msg.startswith("+稅收") or msg.startswith("-支出"):
-        parts = msg.split(maxsplit=2)
+        parts = msg.split()
         if len(parts) < 2:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 格式錯誤！範例：+稅收 1000 備註"))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 格式錯誤！\n範例：+稅收 1000 亞丁稅"))
             return
 
         rtype = "稅收" if msg.startswith("+稅收") else "支出"
         try:
             amount = int(parts[1])
             note = parts[2] if len(parts) > 2 else "無備註"
-            user_id = event.source.user_id
-            group_id = get_source_id(event)
+            gid = event.source.group_id if event.source.type == 'group' else event.source.user_id
+            uid = event.source.user_id
 
-            if save_finance_record(group_id, rtype, amount, note, user_id):
-                reply_text = f"✅ 已紀錄{rtype}：{amount}\n項目：{note}"
-                # 這裡可以選擇是否直接回傳餘額摘要
-                summary = get_finance_summary(group_id)
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{reply_text}\n\n{summary}"))
+            if save_finance_record(gid, rtype, amount, note, uid):
+                summary = get_finance_summary(gid)
+                reply = f"✅ 已紀錄{rtype}：{amount}\n📝 備註：{note}\n\n{summary}"
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         except ValueError:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 金額請輸入純數字"))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 金額請輸入數字"))
         return
 
     # 查詢指令
