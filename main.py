@@ -2703,7 +2703,7 @@ def handle_message(event):
     if msg.startswith("收入") or msg.startswith("支出"):
         parts = msg.split()
     
-        rtype = "稅收" if msg.startswith("稅收") else "支出"
+        rtype = "收入" if msg.startswith("收入") else "支出"
         try:
             amount = int(parts[1])
             note = parts[2] if len(parts) > 2 else "無備註"
