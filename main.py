@@ -2513,6 +2513,52 @@ def roster_delete(user_id):
                 (user_id,)
             )
         conn.commit()
+# 新增財務紀錄到資料庫
+def save_finance_record(group_id, record_type, amount, note, user_id):
+    conn = get_pg_conn()
+    if not conn: return False
+    try:
+        cur = conn.cursor()
+        query = """
+            INSERT INTO castle_finance (group_id, record_type, amount, note, user_id)
+            VALUES (%s, %s, %s, %s, %s)
+        """
+        cur.execute(query, (group_id, record_type, amount, note, user_id))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"財務紀錄失敗: {e}")
+        return False
+    finally:
+        cur.close()
+        conn.close()
+
+# 取得目前餘額與財務摘要
+def get_finance_summary(group_id):
+    conn = get_pg_conn()
+    if not conn: return "無法連線資料庫"
+    try:
+        cur = conn.cursor()
+        query = """
+            SELECT record_type, SUM(amount) 
+            FROM castle_finance 
+            WHERE group_id = %s 
+            GROUP BY record_type
+        """
+        cur.execute(query, (group_id,))
+        rows = cur.fetchall()
+        
+        income = 0
+        expense = 0
+        for r_type, total in rows:
+            if r_type == '稅收': income = total
+            else: expense = total
+            
+        balance = income - expense
+        return f"🏰 城堡財務報表\n💰 總稅收：{income}\n💸 總支出：{expense}\n⚖️ 庫存餘額：{balance}"
+    finally:
+        cur.close()
+        conn.close()
 # FastAPI Webhook
 @app.on_event("startup")
 async def startup():
@@ -2592,6 +2638,37 @@ def handle_message(event):
     raw_text = event.message.text.strip()
     msg_text_no_space = raw_text.replace(" ", "")
 
+
+    # --- 城堡財務功能 ---
+    # 指令範例：+稅收 10000 亞丁稅收
+    if msg.startswith("+稅收") or msg.startswith("-支出"):
+        parts = msg.split(maxsplit=2)
+        if len(parts) < 2:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 格式錯誤！範例：+稅收 1000 備註"))
+            return
+
+        rtype = "稅收" if msg.startswith("+稅收") else "支出"
+        try:
+            amount = int(parts[1])
+            note = parts[2] if len(parts) > 2 else "無備註"
+            user_id = event.source.user_id
+            group_id = get_source_id(event)
+
+            if save_finance_record(group_id, rtype, amount, note, user_id):
+                reply_text = f"✅ 已紀錄{rtype}：{amount}\n項目：{note}"
+                # 這裡可以選擇是否直接回傳餘額摘要
+                summary = get_finance_summary(group_id)
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"{reply_text}\n\n{summary}"))
+        except ValueError:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 金額請輸入純數字"))
+        return
+
+    # 查詢指令
+    if msg == "城鑽" or msg == "財務報表":
+        group_id = get_source_id(event)
+        summary = get_finance_summary(group_id)
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=summary))
+        return
     #-------------------------------------------------------------競標---------------------------------------
     # 1. 發起：例如打「掉落 紅布」
     if text.startswith("掉落 "):
