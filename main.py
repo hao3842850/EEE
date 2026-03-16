@@ -2703,35 +2703,32 @@ def handle_message(event):
     if msg.startswith("收入") or msg.startswith("支出") or msg.startswith("稅收"):
         parts = msg.split()
         
-        # 1. 修正類型判斷邏輯
-        if msg.startswith("收入"):
-            rtype = "收入"
-        elif msg.startswith("稅收"):
+        # --- 修正後的類型判斷邏輯 ---
+        if msg.startswith("稅收"):
             rtype = "稅收"
+        elif msg.startswith("收入"):
+            rtype = "收入"
         else:
             rtype = "支出"
+        # -----------------------
 
         try:
-            # 取得金額並轉為整數
-            raw_amount = int(parts[1])
-            
-            # 2. 自動處理正負值 (讓資料庫統計更直覺)
-            # 如果是支出且使用者輸入正數，我們可以考慮將其存為負值，或是由 save_finance_record 處理
-            amount = -abs(raw_amount) if rtype == "支出" else abs(raw_amount)
-            
+            amount = int(parts[1])
             note = parts[2] if len(parts) > 2 else "無備註"
             gid = event.source.group_id if event.source.type == 'group' else event.source.user_id
             uid = event.source.user_id
 
-            # 3. 儲存並回覆
-            if save_finance_record(gid, rtype, amount, note, uid):
+            # 建議：如果是支出，自動把金額轉為負數存入資料庫，計算報表會更容易
+            save_amount = -amount if rtype == "支出" else amount
+
+            if save_finance_record(gid, rtype, save_amount, note, uid):
                 summary = get_finance_summary(gid)
-                # 使用我們之前設計的美化 Flex Card
-                flex_msg = get_finance_flex(rtype, abs(amount), note, summary) 
+                # 這裡傳入 abs(save_amount) 是為了讓卡片顯示正數金額，看起來比較美觀
+                flex_msg = get_finance_flex(rtype, abs(save_amount), note, summary)
                 line_bot_api.reply_message(event.reply_token, flex_msg)
                 
         except (ValueError, IndexError):
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 格式錯誤！請輸入：[收入/支出] [金額] [備註]"))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 格式錯誤！範例：收入 100 獎金"))
         return
 
     # 查詢指令
@@ -2973,3 +2970,4 @@ if __name__ == "__main__":
     )
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL 未設定")
+
