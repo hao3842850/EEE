@@ -2552,9 +2552,71 @@ def get_finance_summary(group_id):
         rows = cur.fetchall()
         income = sum(amt for rtype, amt in rows if rtype == "稅收")
         expense = sum(amt for rtype, amt in rows if rtype == "支出")
-        return f"🏰 城堡財政摘要\n💰 總稅收：{income}\n💸 總支出：{expense}\n⚖️ 庫存：{income - expense}"
+        return f"🏰 城堡財政摘要\n💰 總稅收：{income}\n💸 總支出：{expense}\n⚖️ 剩餘：{income - expense}"
     finally:
         conn.close()
+
+def get_finance_flex(rtype, amount, note, summary):
+    # 根據類型決定顏色
+    accent_color = "#1DB446" if rtype == "收入" or rtype == "稅收" else "#E52B50"
+    
+    flex_contents = {
+      "type": "bubble",
+      "body": {
+        "type": "box",
+        "layout": "vertical",
+        "contents": [
+          {"type": "text", "text": "🏰 城堡財務紀錄", "weight": "bold", "color": accent_color, "size": "sm"},
+          {"type": "text", "text": f"已紀錄{rtype}", "weight": "bold", "size": "xl", "margin": "md"},
+          {"type": "separator", "margin": "xxl"},
+          {"type": "box", "layout": "vertical", "margin": "xxl", "spacing": "sm", "contents": [
+              {"type": "box", "layout": "horizontal", "contents": [
+                  {"type": "text", "text": "變動金額", "size": "sm", "color": "#555555"},
+                  {"type": "text", "text": f"${amount:,}", "size": "sm", "color": "#111111", "align": "end", "weight": "bold"}
+              ]},
+              {"type": "box", "layout": "horizontal", "contents": [
+                  {"type": "text", "text": "項目備註", "size": "sm", "color": "#555555"},
+                  {"type": "text", "text": note, "size": "sm", "color": "#111111", "align": "end", "wrap": True}
+              ]}
+          ]},
+          {"type": "separator", "margin": "xxl"},
+          {"type": "box", "layout": "vertical", "margin": "md", "contents": [
+              {"type": "text", "text": "📊 當前國庫統計", "size": "xs", "color": "#aaaaaa", "margin": "xs"},
+              {"type": "text", "text": summary, "size": "xs", "color": "#aaaaaa", "wrap": True}
+          ]}
+        ]
+      }
+    }
+    return FlexSendMessage(alt_text=f"財務紀錄: {rtype} {amount}", contents=flex_contents)
+
+def send_finance_report(event, summary_text):
+    # 建議：如果可以，讓 get_finance_summary 回傳 dict
+    # 這裡我們先假設 summary_text 已經包含所需資訊，直接塞入摘要區塊
+    
+    flex_contents = {
+      "type": "bubble",
+      "body": {
+        "type": "box",
+        "layout": "vertical",
+        "contents": [
+          {"type": "text", "text": "🛡️ 城堡財政部", "weight": "bold", "color": "#8B4513", "size": "sm"},
+          {"type": "text", "text": "國庫財務報表", "weight": "bold", "size": "xl", "margin": "md"},
+          {"type": "separator", "margin": "lg"},
+          {"type": "box", "layout": "vertical", "margin": "lg", "contents": [
+              {"type": "text", "text": "當前詳細統計：", "size": "xs", "color": "#888888", "margin": "sm"},
+              {"type": "text", "text": summary_text, "size": "sm", "wrap": True, "margin": "md", "lineSpacing": "5px"}
+          ]},
+          {"type": "box", "layout": "vertical", "margin": "xl", "paddingAll": "md", "backgroundColor": "#F8F8F8", "contents": [
+              {"type": "text", "text": "⚠️ 提醒：請大臣務必據實申報。", "size": "xxs", "color": "#aaaaaa", "align": "center"}
+          ]}
+        ]
+      }
+    }
+    
+    line_bot_api.reply_message(
+        event.reply_token,
+        FlexSendMessage(alt_text="城鑽財務報表", contents=flex_contents))
+
 # FastAPI Webhook
 @app.on_event("startup")
 async def startup():
@@ -2636,15 +2698,12 @@ def handle_message(event):
 
 
     # --- 城堡財務功能 ---
-    # 指令範例：+稅收 10000 亞丁稅收
+    # 指令範例：稅收 10000 亞丁稅收
     # 城堡財務紀錄
-    if msg.startswith("+稅收") or msg.startswith("-支出"):
+    if msg.startswith("收入") or msg.startswith("支出"):
         parts = msg.split()
-        if len(parts) < 2:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 格式錯誤！\n範例：+稅收 1000 亞丁稅"))
-            return
-
-        rtype = "稅收" if msg.startswith("+稅收") else "支出"
+    
+        rtype = "稅收" if msg.startswith("稅收") else "支出"
         try:
             amount = int(parts[1])
             note = parts[2] if len(parts) > 2 else "無備註"
@@ -2653,8 +2712,8 @@ def handle_message(event):
 
             if save_finance_record(gid, rtype, amount, note, uid):
                 summary = get_finance_summary(gid)
-                reply = f"✅ 已紀錄{rtype}：{amount}\n📝 備註：{note}\n\n{summary}"
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+                flex_msg = get_finance_flex(rtype, amount, note, summary)
+                line_bot_api.reply_message(event.reply_token, flex_msg)
         except ValueError:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 金額請輸入數字"))
         return
@@ -2663,7 +2722,7 @@ def handle_message(event):
     if msg == "城鑽" or msg == "財務報表":
         group_id = get_source_id(event)
         summary = get_finance_summary(group_id)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=summary))
+        send_finance_report(event, summary)
         return
     #-------------------------------------------------------------競標---------------------------------------
     # 1. 發起：例如打「掉落 紅布」
