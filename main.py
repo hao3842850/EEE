@@ -1519,46 +1519,7 @@ def build_kpi_flex(title, period_text, ranking):
             ]
         }
     }
-def get_welcome_flex(notion_url):
-    """回傳歡迎訊息的 Flex Message 內容"""
-    return {
-        "type": "bubble",
-        "size": "mega",
-        "header": {
-            "type": "box",
-            "layout": "vertical",
-            "contents": [
-                {"type": "text", "text": "天堂M吃王小幫手", "weight": "bold", "color": "#FFFFFF", "size": "sm"}
-            ],
-            "backgroundColor": "#05B050"
-        },
-        "body": {
-            "type": "box",
-            "layout": "vertical",
-            "contents": [
-                {"type": "text", "text": "感謝邀請！", "weight": "bold", "size": "xl", "margin": "md"},
-                {"type": "text", "text": "本群組已自動開啟 7 天試用期。", "size": "sm", "color": "#666666", "wrap": True},
-                {"type": "separator", "margin": "lg"},
-                {"type": "text", "text": "點擊下方按鈕查看如何快速上手：", "size": "sm", "color": "#999999", "margin": "md", "wrap": True}
-            ]
-        },
-        "footer": {
-            "type": "box",
-            "layout": "vertical",
-            "contents": [
-                {
-                    "type": "button",
-                    "action": {
-                        "type": "uri",
-                        "label": "📖 完整使用教學",
-                        "uri": notion_url
-                    },
-                    "style": "primary",
-                    "color": "#05B050"
-                }
-            ]
-        }
-    }
+
 def build_roster_added_flex(clan, game_name):
     return {
         "type": "bubble",
@@ -2566,28 +2527,7 @@ async def process_line_event(body: bytes, signature: str):
         handler.handle(body.decode("utf-8"), signature)
     except Exception as e:
         print("LINE 背景處理錯誤:", e)
-@handler.add(JoinEvent)
-def handle_join(event):
-    """當機器人被邀請加入群組時觸發"""
-    group_id = get_source_id(event)
-    
-    # 執行訂閱檢查
-    check_subscription(group_id)
-    
-    notion_url = "https://erratic-penguin-857.notion.site/M-3069463a3aa78018be13fe885278b1cc?source=copy_link"
-    
-    # 使用剛才定義的單一函式取得內容
-    flex_content = get_welcome_flex(notion_url)
-    
-    try:
-        line_bot_api.reply_message(
-            event.reply_token,
-            [
-                FlexSendMessage(alt_text="小幫手報到！", contents=flex_content)
-            ]
-        )
-    except Exception as e:
-        print(f"Error: {e}")
+
 @handler.add(MemberJoinedEvent)
 def handle_member_joined(event):
     # 只處理群組 / room
@@ -2637,10 +2577,21 @@ def handle_message(event):
     user_id = event.source.user_id
     text = event.message.text.strip()
     msg = text
+    raw_text = event.message.text.strip()
+    lines = raw_text.splitlines()
+    success_count = 0
+    failed_lines = []
+    # 在進入迴圈前，先定義好模式判斷
+    is_multi_register = len(lines) > 1
+    # 只有包含「📦」或「備份」字眼的多行訊息，才判定為靜音備份模式
+    is_backup_mode = is_multi_register and ("📦" in raw_text or "備份" in raw_text)
     db = load_db()
     group_id = get_source_id(event)
     db.setdefault("boss", {})
     db["boss"].setdefault(group_id, {})
+    raw_text = event.message.text.strip()
+    msg_text_no_space = raw_text.replace(" ", "")
+
     #-------------------------------------------------------------競標---------------------------------------
     # 1. 發起：例如打「掉落 紅布」
     if text.startswith("掉落 "):
@@ -2860,6 +2811,7 @@ def handle_message(event):
         reply = build_roster_search_flex(keyword, result)
         line_bot_api.reply_message(event.reply_token, reply)
         return
+
 @app.get("/")
 def root():
     return {"status": "OK"}
