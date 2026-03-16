@@ -2548,17 +2548,31 @@ def get_finance_summary(group_id):
     if not conn: return "無法連線資料庫"
     try:
         cur = conn.cursor()
+        # 查詢所有紀錄類型的總和
         cur.execute("SELECT record_type, SUM(amount) FROM castle_finance WHERE group_id = %s GROUP BY record_type", (group_id,))
         rows = cur.fetchall()
-        income = sum(amt for rtype, amt in rows if rtype == "稅收")
+        
+        # 修正判斷條件：同時包含 "稅收" 與 "收入"
+        income = sum(amt for rtype, amt in rows if rtype in ["稅收", "收入"])
+        # 支出通常存為負數，所以取絕對值 abs() 方便顯示
         expense = sum(amt for rtype, amt in rows if rtype == "支出")
-        return f"🏰 城堡財政摘要\n💰 總稅收：{income}\n💸 總支出：{expense}\n⚖️ 剩餘：{income - expense}"
+        
+        # 修正剩餘計算：直接把所有數字加起來就好 (因為支出已經是負的了)
+        total_balance = income + expense 
+        
+        # 為了顯示好看，支出顯示正數
+        return f"🏰 城堡財政摘要\n💰 總收入：{income}\n💸 總支出：{abs(expense)}\n⚖️ 剩餘：{total_balance}"
     finally:
         conn.close()
 
 def get_finance_flex(rtype, amount, note, summary):
     # 根據類型決定顏色
-    accent_color = "#1DB446" if rtype == "收入" or rtype == "稅收" else "#E52B50"
+    accent_color = "#1DB446" if rtype in ["收入", "稅收"] else "#E52B50"
+    
+    # 解析 summary 字串變成更美觀的排版 (簡單拆分法)
+    lines = summary.split('\n')
+    summary_title = lines[0] # 🏰 城堡財政摘要
+    details = lines[1:]      # 其他統計內容
     
     flex_contents = {
       "type": "bubble",
@@ -2580,9 +2594,10 @@ def get_finance_flex(rtype, amount, note, summary):
               ]}
           ]},
           {"type": "separator", "margin": "xxl"},
-          {"type": "box", "layout": "vertical", "margin": "md", "contents": [
-              {"type": "text", "text": "📊 當前國庫統計", "size": "xs", "color": "#aaaaaa", "margin": "xs"},
-              {"type": "text", "text": summary, "size": "xs", "color": "#aaaaaa", "wrap": True}
+          # --- 底部統計區塊優化 ---
+          {"type": "box", "layout": "vertical", "margin": "md", "backgroundColor": "#F7F7F7", "paddingAll": "md", "cornerRadius": "sm", "contents": [
+              {"type": "text", "text": "📊 國庫即時報表", "size": "xs", "weight": "bold", "color": "#555555", "margin": "xs"},
+              {"type": "text", "text": "\n".join(details), "size": "xs", "color": "#888888", "wrap": True, "lineSpacing": "4px"}
           ]}
         ]
       }
