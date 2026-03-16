@@ -2699,34 +2699,38 @@ def handle_message(event):
 
     # --- 城堡財務功能 ---
     # 指令範例：稅收 10000 亞丁稅收
-    # 城堡財務紀錄
     if msg.startswith("收入") or msg.startswith("支出"):
         parts = msg.split()
         
-        # 1. 單純化類型判斷
-        rtype = "收入" if msg.startswith("收入") else "支出"
+        # 1. 判定類型（直接決定正負號 multiplier）
+        if msg.startswith("收入"):
+            rtype = "收入"
+            multiplier = 1
+        else:
+            rtype = "支出"
+            multiplier = -1
         
         try:
-            # 取得金額
-            amount = int(parts[1])
-            # 取得備註
-            note = parts[2] if len(parts) > 2 else "無備註"
+            # 2. 取得金額並強制轉換正負
+            # 使用 abs() 確保使用者輸入「支出 -100」時不會變成負負得正
+            raw_amount = int(parts[1])
+            save_amount = abs(raw_amount) * multiplier 
             
+            note = parts[2] if len(parts) > 2 else "無備註"
             gid = event.source.group_id if event.source.type == 'group' else event.source.user_id
             uid = event.source.user_id
 
-            # 2. 自動處理正負值：收入為正，支出為負
-            # 這樣你的 get_finance_summary 只要加總所有金額就會得到正確餘額
-            save_amount = amount if rtype == "收入" else -amount
-
+            # 3. 執行儲存
+            # 注意：請確認你的 save_finance_record 內部是直接將 save_amount 「加」到資料庫
             if save_finance_record(gid, rtype, save_amount, note, uid):
                 summary = get_finance_summary(gid)
-                # 呼叫下方的 Flex Message 函數
-                flex_msg = get_finance_flex(rtype, amount, note, summary)
+                
+                # 呼叫美化卡片 (顯示時取絕對值，符號由卡片邏輯判斷)
+                flex_msg = get_finance_flex(rtype, abs(save_amount), note, summary)
                 line_bot_api.reply_message(event.reply_token, flex_msg)
                 
         except (ValueError, IndexError):
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 格式錯誤！\n請輸入：收入 100 備註\n或：支出 100 備註"))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 請輸入正確格式：收入 100 備註"))
         return
 
     # 查詢指令
