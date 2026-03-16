@@ -2700,35 +2700,33 @@ def handle_message(event):
     # --- 城堡財務功能 ---
     # 指令範例：稅收 10000 亞丁稅收
     # 城堡財務紀錄
-    if msg.startswith("收入") or msg.startswith("支出") or msg.startswith("稅收"):
+    if msg.startswith("收入") or msg.startswith("支出"):
         parts = msg.split()
         
-        # --- 修正後的類型判斷邏輯 ---
-        if msg.startswith("稅收"):
-            rtype = "稅收"
-        elif msg.startswith("收入"):
-            rtype = "收入"
-        else:
-            rtype = "支出"
-        # -----------------------
-
+        # 1. 單純化類型判斷
+        rtype = "收入" if msg.startswith("收入") else "支出"
+        
         try:
+            # 取得金額
             amount = int(parts[1])
+            # 取得備註
             note = parts[2] if len(parts) > 2 else "無備註"
+            
             gid = event.source.group_id if event.source.type == 'group' else event.source.user_id
             uid = event.source.user_id
 
-            # 建議：如果是支出，自動把金額轉為負數存入資料庫，計算報表會更容易
-            save_amount = -amount if rtype == "支出" else amount
+            # 2. 自動處理正負值：收入為正，支出為負
+            # 這樣你的 get_finance_summary 只要加總所有金額就會得到正確餘額
+            save_amount = amount if rtype == "收入" else -amount
 
             if save_finance_record(gid, rtype, save_amount, note, uid):
                 summary = get_finance_summary(gid)
-                # 這裡傳入 abs(save_amount) 是為了讓卡片顯示正數金額，看起來比較美觀
-                flex_msg = get_finance_flex(rtype, abs(save_amount), note, summary)
+                # 呼叫下方的 Flex Message 函數
+                flex_msg = get_finance_flex(rtype, amount, note, summary)
                 line_bot_api.reply_message(event.reply_token, flex_msg)
                 
         except (ValueError, IndexError):
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 格式錯誤！範例：收入 100 獎金"))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 格式錯誤！\n請輸入：收入 100 備註\n或：支出 100 備註"))
         return
 
     # 查詢指令
@@ -2970,4 +2968,3 @@ if __name__ == "__main__":
     )
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL 未設定")
-
