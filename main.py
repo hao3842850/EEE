@@ -2702,35 +2702,34 @@ def handle_message(event):
     if msg.startswith("收入") or msg.startswith("支出"):
         parts = msg.split()
         
-        # 1. 判定類型（直接決定正負號 multiplier）
-        if msg.startswith("收入"):
-            rtype = "收入"
-            multiplier = 1
-        else:
-            rtype = "支出"
-            multiplier = -1
+        # 1. 判定類型：強制使用 msg[0:2] 抓取最精準的字串
+        # 這樣可以避免因為空格或編碼導致 startswith 失敗
+        main_type = msg[0:2] 
         
         try:
-            # 2. 取得金額並強制轉換正負
-            # 使用 abs() 確保使用者輸入「支出 -100」時不會變成負負得正
-            raw_amount = int(parts[1])
-            save_amount = abs(raw_amount) * multiplier 
-            
+            amount = int(parts[1])
             note = parts[2] if len(parts) > 2 else "無備註"
             gid = event.source.group_id if event.source.type == 'group' else event.source.user_id
             uid = event.source.user_id
 
-            # 3. 執行儲存
-            # 注意：請確認你的 save_finance_record 內部是直接將 save_amount 「加」到資料庫
+            # 2. 核心修正：
+            # 收入存正數，支出存負數
+            if main_type == "收入":
+                rtype = "收入"
+                save_amount = abs(amount)
+            else:
+                rtype = "支出"
+                save_amount = -abs(amount)
+
+            # 3. 儲存到資料庫
             if save_finance_record(gid, rtype, save_amount, note, uid):
                 summary = get_finance_summary(gid)
-                
-                # 呼叫美化卡片 (顯示時取絕對值，符號由卡片邏輯判斷)
-                flex_msg = get_finance_flex(rtype, abs(save_amount), note, summary)
+                # 呼叫 Flex Message (傳入金額與摘要)
+                flex_msg = get_finance_flex(rtype, abs(amount), note, summary)
                 line_bot_api.reply_message(event.reply_token, flex_msg)
                 
         except (ValueError, IndexError):
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 請輸入正確格式：收入 100 備註"))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 格式錯誤"))
         return
 
     # 查詢指令
