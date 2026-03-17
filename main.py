@@ -2802,13 +2802,6 @@ def handle_message(event):
             # 定義 Flex Message 卡片內容
             flex_contents = {
                 "type": "bubble",
-                "hero": {
-                    "type": "image",
-                    "url": "https://i.imgur.com/vHq0L94.png", # Discord 橫幅預設圖
-                    "size": "full",
-                    "aspectRatio": "20:13",
-                    "aspectMode": "cover"
-                },
                 "body": {
                     "type": "box",
                     "layout": "vertical",
