@@ -2744,7 +2744,7 @@ def handle_message(event):
                     # --- 製作設定成功的 Flex Card ---
                     success_card = {
                         "type": "bubble",
-                        "size": "sm",
+                        "size": "kilo",  # 正確：size 應該在 bubble 這一層。可選: nano, micro, kilo, mega, giga
                         "body": {
                             "type": "box",
                             "layout": "vertical",
@@ -2762,7 +2762,8 @@ def handle_message(event):
                                     "text": "現在輸入「DC」即可查看新網址",
                                     "size": "xs",
                                     "color": "#555555",
-                                    "margin": "sm"
+                                    "margin": "sm",
+                                    "wrap": True
                                 }
                             ]
                         }
