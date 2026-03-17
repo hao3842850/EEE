@@ -2723,28 +2723,85 @@ def handle_message(event):
     # 取得群組或使用者 ID
     source_id = event.source.group_id if hasattr(event.source, 'group_id') else event.source.user_id
 
-    # --- 功能：設定 DC 網址 (格式：設定DC 網址) ---
-    if msg.startswith("設定DC "):
-        parts = msg.split(maxsplit=1)
-        if len(parts) == 2:
-            new_url = parts[1].strip()
-            conn = get_pg_conn()
-            if conn:
-                try:
-                    cur = conn.cursor()
-                    cur.execute("""
-                        INSERT INTO settings (group_id, discord_url) 
-                        VALUES (%s, %s)
-                        ON CONFLICT (group_id) 
-                        DO UPDATE SET discord_url = EXCLUDED.discord_url
-                    """, (source_id, new_url))
-                    conn.commit()
-                    cur.close()
-                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="✅ Discord 網址儲存成功"))
-                except Exception as e:
-                    print(f"儲存錯誤: {e}")
-                finally:
-                    conn.close()
+    # --- 功能：輸出 DC 網址 (升級為 Flex Message) ---
+    if msg == "DC":
+        conn = get_pg_conn()
+        url = None
+        if conn:
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT discord_url FROM settings WHERE group_id = %s", (source_id,))
+                row = cur.fetchone()
+                if row:
+                    url = row[0]
+                cur.close()
+            except Exception as e:
+                print(f"讀取錯誤: {e}")
+            finally:
+                conn.close()
+        
+        if url:
+            # 製作 Flex Message 物件
+            flex_contents = {
+                "type": "bubble",
+                "hero": {
+                    "type": "image",
+                    "url": "https://i.imgur.com/vHq0L94.png", # 這裡可以更換成你群組的專屬圖片
+                    "size": "full",
+                    "aspectRatio": "20:13",
+                    "aspectMode": "cover"
+                },
+                "body": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "Discord 伺服器",
+                            "weight": "bold",
+                            "size": "xl",
+                            "color": "#1DB954"
+                        },
+                        {
+                            "type": "text",
+                            "text": "加入我們的社群，參與即時討論與獲取最新消息！",
+                            "size": "sm",
+                            "color": "#8c8c8c",
+                            "margin": "md",
+                            "wrap": True
+                        }
+                    ]
+                },
+                "footer": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "spacing": "sm",
+                    "contents": [
+                        {
+                            "type": "button",
+                            "style": "primary",
+                            "height": "sm",
+                            "color": "#5865F2", # Discord 品牌藍
+                            "action": {
+                                "type": "uri",
+                                "label": "立即加入",
+                                "uri": url
+                            }
+                        }
+                    ]
+                }
+            }
+            
+            # 發送卡片
+            line_bot_api.reply_message(
+                event.reply_token,
+                FlexSendMessage(alt_text="收到 Discord 邀請傳送門", contents=flex_contents)
+            )
+        else:
+            line_bot_api.reply_message(
+                event.reply_token, 
+                TextSendMessage(text="❌ 目前尚未設定網址。\n請輸入「設定DC [網址]」進行設定。")
+            )
         return
 
     # --- 功能：輸出 DC 網址 (精確觸發：必須剛好等於 "DC") ---
@@ -2765,9 +2822,66 @@ def handle_message(event):
                 conn.close()
         
         if url:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"🔗 Discord 傳送門：\n{url}"))
+            # 定義 Flex Message 卡片內容
+            flex_contents = {
+                "type": "bubble",
+                "hero": {
+                    "type": "image",
+                    "url": "https://i.imgur.com/vHq0L94.png", # Discord 橫幅預設圖
+                    "size": "full",
+                    "aspectRatio": "20:13",
+                    "aspectMode": "cover"
+                },
+                "body": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "Discord 伺服器",
+                            "weight": "bold",
+                            "size": "xl"
+                        },
+                        {
+                            "type": "text",
+                            "text": "點擊下方按鈕加入社群，與大家一起交流！",
+                            "size": "sm",
+                            "color": "#8c8c8c",
+                            "margin": "md",
+                            "wrap": True
+                        }
+                    ]
+                },
+                "footer": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "spacing": "sm",
+                    "contents": [
+                        {
+                            "type": "button",
+                            "style": "primary",
+                            "height": "sm",
+                            "color": "#5865F2", # Discord 經典藍
+                            "action": {
+                                "type": "uri",
+                                "label": "立即前往",
+                                "uri": url
+                            }
+                        }
+                    ]
+                }
+            }
+            
+            # 發送卡片
+            line_bot_api.reply_message(
+                event.reply_token,
+                FlexSendMessage(alt_text="Discord 邀請傳送門", contents=flex_contents)
+            )
         else:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 目前尚未設定網址。\n請輸入「設定DC [網址]」進行設定。"))
+            line_bot_api.reply_message(
+                event.reply_token, 
+                TextSendMessage(text="❌ 目前尚未設定網址。\n請輸入「設定DC [網址]」進行設定。")
+            )
         return
 
 
