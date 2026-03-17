@@ -1,4 +1,4 @@
-# 天堂M 吃王小幫手
+# 天堂M 專屬小秘書
 
 import os, json, time, asyncio, threading, requests, pytz, psycopg2
 from datetime import datetime, timedelta, timezone
@@ -2574,7 +2574,7 @@ def get_finance_flex(rtype, amount, note, summary):
     summary_title = lines[0] # 🏰 城堡財政摘要
     details = lines[1:]      # 其他統計內容
     
-    flex_contents = {
+    flex_contents = {   
       "type": "bubble",
       "body": {
         "type": "box",
@@ -2631,6 +2631,39 @@ def send_finance_report(event, summary_text):
     line_bot_api.reply_message(
         event.reply_token,
         FlexSendMessage(alt_text="城鑽財務報表", contents=flex_contents))
+
+def init_db():
+    conn = get_pg_conn()
+    if conn:
+        try:
+            cur = conn.cursor()
+            # 建立原有的 roster 表 (保持不變)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS roster (
+                    game_name TEXT PRIMARY KEY,
+                    line_name TEXT,
+                    clan_name TEXT
+                );
+            """)
+            
+            # --- 新增：建立儲存 DC 網址的設定表 ---
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    group_id TEXT PRIMARY KEY,
+                    discord_url TEXT
+                );
+            """)
+            
+            conn.commit()
+            cur.close()
+            print("✅ 資料表初始化成功 (含 settings 表)")
+        except Exception as e:
+            print(f"❌ 初始化資料表失敗: {e}")
+        finally:
+            conn.close()
+
+# 確保在程式啟動時有呼叫它
+init_db()
 
 # FastAPI Webhook
 @app.on_event("startup")
@@ -2753,6 +2786,45 @@ def handle_message(event):
         summary = get_finance_summary(group_id)
         send_finance_report(event, summary)
         return
+    
+    def handle_message(event):
+        msg = event.message.text.strip() # 去除前後空白
+        group_id = event.source.group_id if hasattr(event.source, 'group_id') else event.source.user_id
+
+        # --- 功能：設定 DC 網址 (格式: "設定DC 網址") ---
+        if msg.startswith("設定DC "):
+            new_url = msg.split(" ", 1)[1].strip()
+            conn = get_pg_conn()
+            if conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO settings (group_id, discord_url) 
+                    VALUES (%s, %s)
+                    ON CONFLICT (group_id) 
+                    DO UPDATE SET discord_url = EXCLUDED.discord_url
+                """, (group_id, new_url))
+                conn.commit()
+                conn.close()
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"✅ 已儲存 Discord 網址"))
+            return
+
+        # --- 功能：輸出 DC 網址 (精確觸發：只能是 "DC") ---
+        if msg == "DC":
+            conn = get_pg_conn()
+            url = None
+            if conn:
+                cur = conn.cursor()
+                cur.execute("SELECT discord_url FROM settings WHERE group_id = %s", (group_id,))
+                row = cur.fetchone()
+                url = row[0] if row else None
+                conn.close()
+            
+            if url:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"🔗 本群 Discord 傳送門：\n{url}"))
+            else:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="目前尚未設定 DC 網址。\n請輸入「設定DC [網址]」來儲存。"))
+            return
+
     #-------------------------------------------------------------競標---------------------------------------
     # 1. 發起：例如打「掉落 紅布」
     if text.startswith("掉落 "):
