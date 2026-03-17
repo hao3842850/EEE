@@ -2724,84 +2724,60 @@ def handle_message(event):
     source_id = event.source.group_id if hasattr(event.source, 'group_id') else event.source.user_id
 
     # --- 功能：輸出 DC 網址 (升級為 Flex Message) ---
-    if msg == "DC":
-        conn = get_pg_conn()
-        url = None
-        if conn:
-            try:
-                cur = conn.cursor()
-                cur.execute("SELECT discord_url FROM settings WHERE group_id = %s", (source_id,))
-                row = cur.fetchone()
-                if row:
-                    url = row[0]
-                cur.close()
-            except Exception as e:
-                print(f"讀取錯誤: {e}")
-            finally:
-                conn.close()
-        
-        if url:
-            # 製作 Flex Message 物件
-            flex_contents = {
-                "type": "bubble",
-                "hero": {
-                    "type": "image",
-                    "url": "https://i.imgur.com/vHq0L94.png", # 這裡可以更換成你群組的專屬圖片
-                    "size": "full",
-                    "aspectRatio": "20:13",
-                    "aspectMode": "cover"
-                },
-                "body": {
-                    "type": "box",
-                    "layout": "vertical",
-                    "contents": [
-                        {
-                            "type": "text",
-                            "text": "Discord 伺服器",
-                            "weight": "bold",
-                            "size": "xl",
-                            "color": "#1DB954"
-                        },
-                        {
-                            "type": "text",
-                            "text": "加入我們的社群，參與即時討論與獲取最新消息！",
-                            "size": "sm",
-                            "color": "#8c8c8c",
-                            "margin": "md",
-                            "wrap": True
+    if msg.startswith("設定DC "):
+        parts = msg.split(maxsplit=1)
+        if len(parts) == 2:
+            new_url = parts[1].strip()
+            conn = get_pg_conn()
+            if conn:
+                try:
+                    cur = conn.cursor()
+                    cur.execute("""
+                        INSERT INTO settings (group_id, discord_url) 
+                        VALUES (%s, %s)
+                        ON CONFLICT (group_id) 
+                        DO UPDATE SET discord_url = EXCLUDED.discord_url
+                    """, (source_id, new_url))
+                    conn.commit()
+                    cur.close()
+
+                    # --- 製作設定成功的 Flex Card ---
+                    success_card = {
+                        "type": "bubble",
+                        "size": "sm",
+                        "body": {
+                            "type": "box",
+                            "layout": "vertical",
+                            "backgroundColor": "#ECF9F1",
+                            "contents": [
+                                {
+                                    "type": "text",
+                                    "text": "✅ 設定儲存成功",
+                                    "weight": "bold",
+                                    "size": "md",
+                                    "color": "#1DB446"
+                                },
+                                {
+                                    "type": "text",
+                                    "text": "現在輸入「DC」即可查看新網址",
+                                    "size": "xs",
+                                    "color": "#555555",
+                                    "margin": "sm"
+                                }
+                            ]
                         }
-                    ]
-                },
-                "footer": {
-                    "type": "box",
-                    "layout": "vertical",
-                    "spacing": "sm",
-                    "contents": [
-                        {
-                            "type": "button",
-                            "style": "primary",
-                            "height": "sm",
-                            "color": "#5865F2", # Discord 品牌藍
-                            "action": {
-                                "type": "uri",
-                                "label": "立即加入",
-                                "uri": url
-                            }
-                        }
-                    ]
-                }
-            }
-            
-            # 發送卡片
-            line_bot_api.reply_message(
-                event.reply_token,
-                FlexSendMessage(alt_text="收到 Discord 邀請傳送門", contents=flex_contents)
-            )
-        else:
-            line_bot_api.reply_message(
-                event.reply_token, 
-                TextSendMessage(text="❌ 目前尚未設定網址。\n請輸入「設定DC [網址]」進行設定。")
-            )
+                    }
+
+                    line_bot_api.reply_message(
+                        event.reply_token, 
+                        FlexSendMessage(alt_text="✅ Discord 網址設定成功", contents=success_card)
+                    )
+
+                except Exception as e:
+                    print(f"儲存錯誤: {e}")
+                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 系統錯誤，請稍後再試"))
+                finally:
+                    conn.close()
         return
 
     # --- 功能：輸出 DC 網址 (精確觸發：必須剛好等於 "DC") ---
