@@ -1116,7 +1116,7 @@ def build_join_roster_guide_flex():
                     },
                     {
                         "type": "text",
-                        "text": "為了正確統計王表與 KPI\n請先完成名冊登記",
+                        "text": "為了更好管理群組\n請先完成名冊登記",
                         "wrap": True,
                         "size": "sm",
                         "color": "#666666"
@@ -1168,7 +1168,7 @@ def build_join_roster_guide_flex():
                     # ===== 補充說明 =====
                     {
                         "type": "text",
-                        "text": "📌 完成後即可使用王表、吃王登記等功能",
+                        "text": "感謝配合🙇",
                         "size": "xs",
                         "color": "#999999",
                         "wrap": True
@@ -2854,7 +2854,45 @@ def handle_message(event):
             )
         return
 
+def update_presence(group_id, user_id):
+    """當有人發言時，記錄其 UID 與目前的群組暱稱"""
+    try:
+        # 關鍵：向 LINE 伺服器請求該成員在群組內的 Profile
+        profile = line_bot_api.get_group_member_profile(group_id, user_id)
+        display_name = profile.display_name
+        
+        conn = get_pg_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO group_presence (group_id, line_id, display_name, last_seen)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (group_id, line_id) 
+            DO UPDATE SET display_name = EXCLUDED.display_name, last_seen = EXCLUDED.last_seen
+        """, (group_id, user_id, display_name, datetime.now(TZ)))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[Presence Update Error] {e}")
 
+# --- 核心邏輯：執行抓漏比對 ---
+def get_missing_members(group_id):
+    """比對發言記錄表與名冊表，找出未登記的人"""
+    conn = get_pg_conn()
+    cur = conn.cursor()
+    # 邏輯：在 presence 存在（有發言過），但不在 roster 存在（沒登記過）
+    query = """
+        SELECT p.display_name
+        FROM group_presence p
+        LEFT JOIN roster r ON p.line_id = r.line_id
+        WHERE p.group_id = %s AND r.line_id IS NULL
+        ORDER BY p.last_seen DESC
+    """
+    cur.execute(query, (group_id,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [row[0] for row in rows]
 
 
 def handle_message(event):
@@ -2972,6 +3010,37 @@ def handle_message(event):
                 msg = f"已取消【{res['item']}】的競標（無人下標）。"
             
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
+            
+            
+
+    msg = event.message.text.strip()
+    user_id = event.source.user_id
+    
+    # 只在群組中啟動記錄功能
+    if event.source.type == 'group':
+        group_id = event.source.group_id
+        # 每當有人說話，非同步或直接更新其存在記錄
+        update_presence(group_id, user_id)
+        
+        # --- 抓漏指令 ---
+        if msg == "抓名冊":
+            missing_list = get_missing_members(group_id)
+            
+            if not missing_list:
+                reply_text = "✅ 檢查完畢！目前發言過的成員皆已完成名冊登記。"
+            else:
+                names = "\n".join([f"• {name}" for name in missing_list])
+                reply_text = (
+                    "⚠️ 偵測到以下成員尚未登記名冊：\n\n"
+                    f"{names}\n\n"
+                    "請以上盟友輸入「加入名冊 血盟 遊戲名字」\n"
+                    "以利後續管理及統計。"
+                )
+            
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            return
+            
+                
 
     #-------------------------------------------------------------加入名冊---------------------------------------
     db.setdefault("__ROSTER_WAIT__", {})
