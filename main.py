@@ -3034,37 +3034,6 @@ def handle_message(event):
                 msg = f"已取消【{res['item']}】的競標（無人下標）。"
             
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
-            
-            
-
-    msg = event.message.text.strip()
-    user_id = event.source.user_id
-    
-    # 只在群組中啟動記錄功能
-    if event.source.type == 'group':
-        group_id = event.source.group_id
-        # 每當有人說話，非同步或直接更新其存在記錄
-        update_presence(group_id, user_id)
-        
-        # --- 抓漏指令 ---
-        if msg == "抓名冊":
-            missing_list = get_missing_members(group_id)
-            
-            if not missing_list:
-                reply_text = "✅ 檢查完畢！目前發言過的成員皆已完成名冊登記。"
-            else:
-                names = "\n".join([f"• {name}" for name in missing_list])
-                reply_text = (
-                    "⚠️ 偵測到以下成員尚未登記名冊：\n\n"
-                    f"{names}\n\n"
-                    "請以上盟友輸入「加入名冊 血盟 遊戲名字」\n"
-                    "以利後續管理及統計。"
-                )
-            
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-            return
-            
-                
 
     #-------------------------------------------------------------加入名冊---------------------------------------
     db.setdefault("__ROSTER_WAIT__", {})
@@ -3232,7 +3201,62 @@ def handle_message(event):
         reply = build_roster_search_flex(keyword, result)
         line_bot_api.reply_message(event.reply_token, reply)
         return
+    
+    msg = event.message.text.strip()
+    user_id = event.source.user_id
+    
+    # --- 關鍵：只要在群組發言，就記錄/更新成員資訊 ---
+    if event.source.type == 'group':
+        group_id = event.source.group_id
+        try:
+            # 取得當前發言者的 LINE 暱稱 (解決看不見 UID 的問題)
+            profile = line_bot_api.get_group_member_profile(group_id, user_id)
+            display_name = profile.display_name
+            
+            conn = get_pg_conn()
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO group_presence (group_id, line_id, display_name, last_seen)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (group_id, line_id) 
+                DO UPDATE SET display_name = EXCLUDED.display_name, last_seen = EXCLUDED.last_seen
+            """, (group_id, user_id, display_name, datetime.now(TZ)))
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            print(f"記錄發言失敗: {e}")
 
+        # --- 抓漏指令實作 ---
+        if msg == "抓名冊":
+            conn = get_pg_conn()
+            cur = conn.cursor()
+            # 比對發言表 (presence) 與名冊表 (roster)
+            # 這裡假設您的名冊表欄位為 line_id
+            cur.execute("""
+                SELECT p.display_name
+                FROM group_presence p
+                LEFT JOIN roster r ON p.line_id = r.line_id
+                WHERE p.group_id = %s AND r.line_id IS NULL
+                ORDER BY p.last_seen DESC
+            """, (group_id,))
+            missing_members = cur.fetchall()
+            cur.close()
+            conn.close()
+
+            if not missing_members:
+                reply = TextSendMessage(text="✅ 檢查完畢！目前發言過的成員皆已完成登記。")
+            else:
+                # 將結果轉換為人名列表
+                names = "\n".join([f"• {m[0]}" for m in missing_members])
+                reply = TextSendMessage(text=(
+                    "⚠️ 以下成員已發言但尚未登記名冊：\n\n"
+                    f"{names}\n\n"
+                    "請未登記的盟友輸入：\n登記 遊戲ID"
+                ))
+            
+            line_bot_api.reply_message(event.reply_token, reply)
+            return
 
 @app.get("/")
 def root():
