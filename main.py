@@ -25,6 +25,30 @@ TZ = pytz.timezone("Asia/Taipei")
 DB_FILE = "database.json"
 DATABASE_URL = os.getenv("DATABASE_URL")
 # 工具函式
+def init_presence_db():
+    """自動建立發言記錄表，對接現有 get_pg_conn"""
+    conn = get_pg_conn()
+    if conn:
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS group_presence (
+                    group_id TEXT,
+                    line_id TEXT,
+                    display_name TEXT,
+                    last_seen TIMESTAMP,
+                    PRIMARY KEY (group_id, line_id)
+                );
+            """)
+            conn.commit()
+            cur.close()
+            conn.close()
+            print("Presence Table 檢查完成")
+        except Exception as e:
+            print(f"初始化 Presence 表失敗: {e}")
+
+# 在程式啟動時呼叫
+init_presence_db()
 def is_peak_time():
     return False # 暫時關閉，永遠允許 Flex 訊息
 
@@ -2717,7 +2741,63 @@ def build_kpi_backup_text(kpi_db):
     return "\n".join(lines)
 #-------------------------------------------------------------****訊息判斷****---------------------------------------
 @handler.add(MessageEvent, message=TextMessage)
+def handle_message(event):
+    msg = event.message.text.strip()
+    user_id = event.source.user_id
+    
+    if event.source.type == 'group':
+        group_id = event.source.group_id
+        
+        # --- [新增] 自動記錄/更新發言者暱稱 ---
+        try:
+            # 透過 LINE API 把 UID 轉成暱稱
+            profile = line_bot_api.get_group_member_profile(group_id, user_id)
+            display_name = profile.display_name
+            
+            conn = get_pg_conn()
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO group_presence (group_id, line_id, display_name, last_seen)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (group_id, line_id) 
+                DO UPDATE SET display_name = EXCLUDED.display_name, last_seen = EXCLUDED.last_seen
+            """, (group_id, user_id, display_name, datetime.now(TZ)))
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            print(f"記錄發言者失敗: {e}")
 
+        # --- [新增] !抓漏 指令 ---
+        if msg == "!抓漏":
+            conn = get_pg_conn()
+            cur = conn.cursor()
+            # 比對：在 presence (有發言) 但不在 roster (沒登記) 的人
+            # 根據您的程式碼，名冊表名稱為 roster
+            cur.execute("""
+                SELECT p.display_name
+                FROM group_presence p
+                LEFT JOIN roster r ON p.line_id = r.line_id
+                WHERE p.group_id = %s AND r.line_id IS NULL
+                ORDER BY p.last_seen DESC
+            """, (group_id,))
+            missing_members = cur.fetchall()
+            cur.close()
+            conn.close()
+
+            if not missing_members:
+                reply = TextSendMessage(text="✅ 檢查完畢！目前發言過的成員皆已完成名冊登記。")
+            else:
+                # 顯示人名清單
+                names = "\n".join([f"• {m[0]}" for m in missing_members])
+                reply = TextSendMessage(text=(
+                    "⚠️ 偵測到以下成員尚未登記名冊：\n\n"
+                    f"{names}\n\n"
+                    "請未登記的盟友輸入：\n加入名冊 血盟名 遊戲角色名"
+                ))
+            
+            line_bot_api.reply_message(event.reply_token, reply)
+            return
 def handle_message(event):
     msg = event.message.text.strip()
     # 取得群組或使用者 ID
@@ -2853,30 +2933,7 @@ def handle_message(event):
                 TextSendMessage(text="❌ 目前尚未設定網址。\n請輸入「設定DC [網址]」進行設定。")
             )
         return
-def init_presence_db():
-    """自動建立發言記錄表，對接現有 get_pg_conn"""
-    conn = get_pg_conn()
-    if conn:
-        try:
-            cur = conn.cursor()
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS group_presence (
-                    group_id TEXT,
-                    line_id TEXT,
-                    display_name TEXT,
-                    last_seen TIMESTAMP,
-                    PRIMARY KEY (group_id, line_id)
-                );
-            """)
-            conn.commit()
-            cur.close()
-            conn.close()
-            print("Presence Table 檢查完成")
-        except Exception as e:
-            print(f"初始化 Presence 表失敗: {e}")
 
-# 在程式啟動時呼叫
-init_presence_db()
 
 def update_presence(group_id, user_id):
     """當有人發言時，記錄其 UID 與目前的群組暱稱"""
