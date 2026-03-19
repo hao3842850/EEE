@@ -2853,6 +2853,30 @@ def handle_message(event):
                 TextSendMessage(text="❌ 目前尚未設定網址。\n請輸入「設定DC [網址]」進行設定。")
             )
         return
+def init_presence_db():
+    """自動建立發言記錄表"""
+    conn = get_pg_conn()
+    if conn:
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS group_presence (
+                    group_id TEXT,
+                    line_id TEXT,
+                    display_name TEXT,
+                    last_seen TIMESTAMP,
+                    PRIMARY KEY (group_id, line_id)
+                );
+            """)
+            conn.commit()
+            cur.close()
+            conn.close()
+            print("Check Presence Table: OK")
+        except Exception as e:
+            print(f"Init Table Error: {e}")
+
+# 在啟動時呼叫一次
+init_presence_db()
 
 def update_presence(group_id, user_id):
     """當有人發言時，記錄其 UID 與目前的群組暱稱"""
