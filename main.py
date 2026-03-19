@@ -1,4 +1,4 @@
-# 天堂M 專屬小秘書
+# 天堂M 吃王小幫手
 
 import os, json, time, asyncio, threading, requests, pytz, psycopg2
 from datetime import datetime, timedelta, timezone
@@ -25,30 +25,6 @@ TZ = pytz.timezone("Asia/Taipei")
 DB_FILE = "database.json"
 DATABASE_URL = os.getenv("DATABASE_URL")
 # 工具函式
-def init_presence_db():
-    """自動建立發言記錄表，對接現有 get_pg_conn"""
-    conn = get_pg_conn()
-    if conn:
-        try:
-            cur = conn.cursor()
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS group_presence (
-                    group_id TEXT,
-                    line_id TEXT,
-                    display_name TEXT,
-                    last_seen TIMESTAMP,
-                    PRIMARY KEY (group_id, line_id)
-                );
-            """)
-            conn.commit()
-            cur.close()
-            conn.close()
-            print("Presence Table 檢查完成")
-        except Exception as e:
-            print(f"初始化 Presence 表失敗: {e}")
-
-# 在程式啟動時呼叫
-init_presence_db()
 def is_peak_time():
     return False # 暫時關閉，永遠允許 Flex 訊息
 
@@ -1140,7 +1116,7 @@ def build_join_roster_guide_flex():
                     },
                     {
                         "type": "text",
-                        "text": "為了更好管理群組\n請先完成名冊登記",
+                        "text": "為了正確統計王表與 KPI\n請先完成名冊登記",
                         "wrap": True,
                         "size": "sm",
                         "color": "#666666"
@@ -1192,7 +1168,7 @@ def build_join_roster_guide_flex():
                     # ===== 補充說明 =====
                     {
                         "type": "text",
-                        "text": "感謝配合🙇",
+                        "text": "📌 完成後即可使用王表、吃王登記等功能",
                         "size": "xs",
                         "color": "#999999",
                         "wrap": True
@@ -2598,7 +2574,7 @@ def get_finance_flex(rtype, amount, note, summary):
     summary_title = lines[0] # 🏰 城堡財政摘要
     details = lines[1:]      # 其他統計內容
     
-    flex_contents = {   
+    flex_contents = {
       "type": "bubble",
       "body": {
         "type": "box",
@@ -2655,32 +2631,6 @@ def send_finance_report(event, summary_text):
     line_bot_api.reply_message(
         event.reply_token,
         FlexSendMessage(alt_text="城鑽財務報表", contents=flex_contents))
-
-def init_db():
-    # 原有的 JSON 初始化保持不變
-    if not os.path.exists(DB_FILE):
-        with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump({"boss": {}}, f, ensure_ascii=False, indent=2)
-
-    # 自動建立 PostgreSQL 資料表
-    conn = get_pg_conn()
-    if conn:
-        try:
-            cur = conn.cursor()
-            # 建立儲存 DC 網址的設定表
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS settings (
-                    group_id TEXT PRIMARY KEY,
-                    discord_url TEXT
-                );
-            """)
-            conn.commit()
-            cur.close()
-            print("✅ 成功檢查/建立 settings 資料表")
-        except Exception as e:
-            print(f"❌ 自動建表失敗: {e}")
-        finally:
-            conn.close()
 
 # FastAPI Webhook
 @app.on_event("startup")
@@ -2742,241 +2692,6 @@ def build_kpi_backup_text(kpi_db):
 #-------------------------------------------------------------****訊息判斷****---------------------------------------
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    msg = event.message.text.strip()
-    user_id = event.source.user_id
-    
-    if event.source.type == 'group':
-        group_id = event.source.group_id
-        
-        # --- [新增] 自動記錄/更新發言者暱稱 ---
-        try:
-            # 透過 LINE API 把 UID 轉成暱稱
-            profile = line_bot_api.get_group_member_profile(group_id, user_id)
-            display_name = profile.display_name
-            
-            conn = get_pg_conn()
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO group_presence (group_id, line_id, display_name, last_seen)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (group_id, line_id) 
-                DO UPDATE SET display_name = EXCLUDED.display_name, last_seen = EXCLUDED.last_seen
-            """, (group_id, user_id, display_name, datetime.now(TZ)))
-            conn.commit()
-            cur.close()
-            conn.close()
-        except Exception as e:
-            print(f"記錄發言者失敗: {e}")
-
-        # --- [新增] !抓漏 指令 ---
-        if msg == "!抓漏":
-            conn = get_pg_conn()
-            cur = conn.cursor()
-            # 比對：在 presence (有發言) 但不在 roster (沒登記) 的人
-            # 根據您的程式碼，名冊表名稱為 roster
-            cur.execute("""
-                SELECT p.display_name
-                FROM group_presence p
-                LEFT JOIN roster r ON p.line_id = r.line_id
-                WHERE p.group_id = %s AND r.line_id IS NULL
-                ORDER BY p.last_seen DESC
-            """, (group_id,))
-            missing_members = cur.fetchall()
-            cur.close()
-            conn.close()
-
-            if not missing_members:
-                reply = TextSendMessage(text="✅ 檢查完畢！目前發言過的成員皆已完成名冊登記。")
-            else:
-                # 顯示人名清單
-                names = "\n".join([f"• {m[0]}" for m in missing_members])
-                reply = TextSendMessage(text=(
-                    "⚠️ 偵測到以下成員尚未登記名冊：\n\n"
-                    f"{names}\n\n"
-                    "請未登記的盟友輸入：\n加入名冊 血盟名 遊戲角色名"
-                ))
-            
-            line_bot_api.reply_message(event.reply_token, reply)
-            return
-def handle_message(event):
-    msg = event.message.text.strip()
-    # 取得群組或使用者 ID
-    source_id = event.source.group_id if hasattr(event.source, 'group_id') else event.source.user_id
-
-    # --- 功能：輸出 DC 網址 (升級為 Flex Message) ---
-    if msg.startswith("設定DC "):
-        parts = msg.split(maxsplit=1)
-        if len(parts) == 2:
-            new_url = parts[1].strip()
-            conn = get_pg_conn()
-            if conn:
-                try:
-                    cur = conn.cursor()
-                    cur.execute("""
-                        INSERT INTO settings (group_id, discord_url) 
-                        VALUES (%s, %s)
-                        ON CONFLICT (group_id) 
-                        DO UPDATE SET discord_url = EXCLUDED.discord_url
-                    """, (source_id, new_url))
-                    conn.commit()
-                    cur.close()
-
-                    # --- 製作設定成功的 Flex Card ---
-                    success_card = {
-                        "type": "bubble",
-                        "size": "kilo",  # 正確：size 應該在 bubble 這一層。可選: nano, micro, kilo, mega, giga
-                        "body": {
-                            "type": "box",
-                            "layout": "vertical",
-                            "backgroundColor": "#ECF9F1",
-                            "contents": [
-                                {
-                                    "type": "text",
-                                    "text": "✅ 設定儲存成功",
-                                    "weight": "bold",
-                                    "size": "md",
-                                    "color": "#1DB446"
-                                },
-                                {
-                                    "type": "text",
-                                    "text": "現在輸入「DC」即可查看新網址",
-                                    "size": "xs",
-                                    "color": "#555555",
-                                    "margin": "sm",
-                                    "wrap": True
-                                }
-                            ]
-                        }
-                    }
-
-                    line_bot_api.reply_message(
-                        event.reply_token, 
-                        FlexSendMessage(alt_text="✅ Discord 網址設定成功", contents=success_card)
-                    )
-
-                except Exception as e:
-                    print(f"儲存錯誤: {e}")
-                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 系統錯誤，請稍後再試"))
-                finally:
-                    conn.close()
-        return
-
-    # --- 功能：輸出 DC 網址 (精確觸發：必須剛好等於 "DC") ---
-    if msg == "DC":
-        conn = get_pg_conn()
-        url = None
-        if conn:
-            try:
-                cur = conn.cursor()
-                cur.execute("SELECT discord_url FROM settings WHERE group_id = %s", (source_id,))
-                row = cur.fetchone()
-                if row:
-                    url = row[0]
-                cur.close()
-            except Exception as e:
-                print(f"讀取錯誤: {e}")
-            finally:
-                conn.close()
-        
-        if url:
-            # 定義 Flex Message 卡片內容
-            flex_contents = {
-                "type": "bubble",
-                "body": {
-                    "type": "box",
-                    "layout": "vertical",
-                    "contents": [
-                        {
-                            "type": "text",
-                            "text": "Discord 伺服器",
-                            "weight": "bold",
-                            "size": "xl"
-                        },
-                        {
-                            "type": "text",
-                            "text": "點擊下方按鈕加入社群，與大家一起交流！",
-                            "size": "sm",
-                            "color": "#8c8c8c",
-                            "margin": "md",
-                            "wrap": True
-                        }
-                    ]
-                },
-                "footer": {
-                    "type": "box",
-                    "layout": "vertical",
-                    "spacing": "sm",
-                    "contents": [
-                        {
-                            "type": "button",
-                            "style": "primary",
-                            "height": "sm",
-                            "color": "#5865F2", # Discord 經典藍
-                            "action": {
-                                "type": "uri",
-                                "label": "立即前往",
-                                "uri": url
-                            }
-                        }
-                    ]
-                }
-            }
-            
-            # 發送卡片
-            line_bot_api.reply_message(
-                event.reply_token,
-                FlexSendMessage(alt_text="Discord 邀請傳送門", contents=flex_contents)
-            )
-        else:
-            line_bot_api.reply_message(
-                event.reply_token, 
-                TextSendMessage(text="❌ 目前尚未設定網址。\n請輸入「設定DC [網址]」進行設定。")
-            )
-        return
-
-
-def update_presence(group_id, user_id):
-    """當有人發言時，記錄其 UID 與目前的群組暱稱"""
-    try:
-        # 關鍵：向 LINE 伺服器請求該成員在群組內的 Profile
-        profile = line_bot_api.get_group_member_profile(group_id, user_id)
-        display_name = profile.display_name
-        
-        conn = get_pg_conn()
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO group_presence (group_id, line_id, display_name, last_seen)
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT (group_id, line_id) 
-            DO UPDATE SET display_name = EXCLUDED.display_name, last_seen = EXCLUDED.last_seen
-        """, (group_id, user_id, display_name, datetime.now(TZ)))
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        print(f"[Presence Update Error] {e}")
-
-# --- 核心邏輯：執行抓漏比對 ---
-def get_missing_members(group_id):
-    """比對發言記錄表與名冊表，找出未登記的人"""
-    conn = get_pg_conn()
-    cur = conn.cursor()
-    # 邏輯：在 presence 存在（有發言過），但不在 roster 存在（沒登記過）
-    query = """
-        SELECT p.display_name
-        FROM group_presence p
-        LEFT JOIN roster r ON p.line_id = r.line_id
-        WHERE p.group_id = %s AND r.line_id IS NULL
-        ORDER BY p.last_seen DESC
-    """
-    cur.execute(query, (group_id,))
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    return [row[0] for row in rows]
-
-
-def handle_message(event):
     user = event.source.user_id
     user_id = event.source.user_id
     text = event.message.text.strip()
@@ -2995,63 +2710,7 @@ def handle_message(event):
     db["boss"].setdefault(group_id, {})
     raw_text = event.message.text.strip()
     msg_text_no_space = raw_text.replace(" ", "")
-    msg = event.message.text.strip()
-    user_id = event.source.user_id
-    
-    if event.source.type == 'group':
-        group_id = event.source.group_id
-        
-        # --- [新增] 自動記錄/更新發言者暱稱 ---
-        try:
-            # 透過 API 把 UID 轉成暱稱，解決使用者看不見 UID 的痛點
-            profile = line_bot_api.get_group_member_profile(group_id, user_id)
-            display_name = profile.display_name
-            
-            conn = get_pg_conn()
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO group_presence (group_id, line_id, display_name, last_seen)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (group_id, line_id) 
-                DO UPDATE SET display_name = EXCLUDED.display_name, last_seen = EXCLUDED.last_seen
-            """, (group_id, user_id, display_name, datetime.now(TZ)))
-            conn.commit()
-            cur.close()
-            conn.close()
-        except Exception as e:
-            # 有些用戶可能封鎖機器人或 API 限制，失敗時僅記錄但不影響主程式
-            print(f"記錄發言者失敗: {e}")
 
-        # --- [新增] 抓漏指令 ---
-        if msg == "!抓漏":
-            conn = get_pg_conn()
-            cur = conn.cursor()
-            # 比對：在 presence (有發言) 但不在 roster (沒登記) 的人
-            # 這裡假設您的名冊表欄位為 line_id (對應您 main.py 的邏輯)
-            cur.execute("""
-                SELECT p.display_name
-                FROM group_presence p
-                LEFT JOIN roster r ON p.line_id = r.line_id
-                WHERE p.group_id = %s AND r.line_id IS NULL
-                ORDER BY p.last_seen DESC
-            """, (group_id,))
-            missing_members = cur.fetchall()
-            cur.close()
-            conn.close()
-
-            if not missing_members:
-                reply = TextSendMessage(text="✅ 檢查完畢！目前發言過的成員皆已完成名冊登記。")
-            else:
-                # 顯示人名，管理者可直接標記
-                names = "\n".join([f"• {m[0]}" for m in missing_members])
-                reply = TextSendMessage(text=(
-                    "⚠️ 偵測到以下成員尚未登記名冊：\n\n"
-                    f"{names}\n\n"
-                    "請未登記的盟友輸入：\n加入名冊 血盟名 遊戲角色名"
-                ))
-            
-            line_bot_api.reply_message(event.reply_token, reply)
-            return
 
     # --- 城堡財務功能 ---
     # 指令範例：稅收 10000 亞丁稅收
@@ -3094,8 +2753,6 @@ def handle_message(event):
         summary = get_finance_summary(group_id)
         send_finance_report(event, summary)
         return
-    
-
     #-------------------------------------------------------------競標---------------------------------------
     # 1. 發起：例如打「掉落 紅布」
     if text.startswith("掉落 "):
@@ -3315,7 +2972,6 @@ def handle_message(event):
         reply = build_roster_search_flex(keyword, result)
         line_bot_api.reply_message(event.reply_token, reply)
         return
-
 
 @app.get("/")
 def root():
