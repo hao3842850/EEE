@@ -1,4 +1,4 @@
-# 天堂M 吃王小幫手
+# 天堂M 專屬小秘書
 
 import os, json, time, asyncio, threading, requests, pytz, psycopg2
 from datetime import datetime, timedelta, timezone
@@ -2574,7 +2574,7 @@ def get_finance_flex(rtype, amount, note, summary):
     summary_title = lines[0] # 🏰 城堡財政摘要
     details = lines[1:]      # 其他統計內容
     
-    flex_contents = {
+    flex_contents = {   
       "type": "bubble",
       "body": {
         "type": "box",
@@ -2631,6 +2631,32 @@ def send_finance_report(event, summary_text):
     line_bot_api.reply_message(
         event.reply_token,
         FlexSendMessage(alt_text="城鑽財務報表", contents=flex_contents))
+
+def init_db():
+    # 原有的 JSON 初始化保持不變
+    if not os.path.exists(DB_FILE):
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump({"boss": {}}, f, ensure_ascii=False, indent=2)
+
+    # 自動建立 PostgreSQL 資料表
+    conn = get_pg_conn()
+    if conn:
+        try:
+            cur = conn.cursor()
+            # 建立儲存 DC 網址的設定表
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    group_id TEXT PRIMARY KEY,
+                    discord_url TEXT
+                );
+            """)
+            conn.commit()
+            cur.close()
+            print("✅ 成功檢查/建立 settings 資料表")
+        except Exception as e:
+            print(f"❌ 自動建表失敗: {e}")
+        finally:
+            conn.close()
 
 # FastAPI Webhook
 @app.on_event("startup")
@@ -2691,6 +2717,146 @@ def build_kpi_backup_text(kpi_db):
     return "\n".join(lines)
 #-------------------------------------------------------------****訊息判斷****---------------------------------------
 @handler.add(MessageEvent, message=TextMessage)
+
+def handle_message(event):
+    msg = event.message.text.strip()
+    # 取得群組或使用者 ID
+    source_id = event.source.group_id if hasattr(event.source, 'group_id') else event.source.user_id
+
+    # --- 功能：輸出 DC 網址 (升級為 Flex Message) ---
+    if msg.startswith("設定DC "):
+        parts = msg.split(maxsplit=1)
+        if len(parts) == 2:
+            new_url = parts[1].strip()
+            conn = get_pg_conn()
+            if conn:
+                try:
+                    cur = conn.cursor()
+                    cur.execute("""
+                        INSERT INTO settings (group_id, discord_url) 
+                        VALUES (%s, %s)
+                        ON CONFLICT (group_id) 
+                        DO UPDATE SET discord_url = EXCLUDED.discord_url
+                    """, (source_id, new_url))
+                    conn.commit()
+                    cur.close()
+
+                    # --- 製作設定成功的 Flex Card ---
+                    success_card = {
+                        "type": "bubble",
+                        "size": "kilo",  # 正確：size 應該在 bubble 這一層。可選: nano, micro, kilo, mega, giga
+                        "body": {
+                            "type": "box",
+                            "layout": "vertical",
+                            "backgroundColor": "#ECF9F1",
+                            "contents": [
+                                {
+                                    "type": "text",
+                                    "text": "✅ 設定儲存成功",
+                                    "weight": "bold",
+                                    "size": "md",
+                                    "color": "#1DB446"
+                                },
+                                {
+                                    "type": "text",
+                                    "text": "現在輸入「DC」即可查看新網址",
+                                    "size": "xs",
+                                    "color": "#555555",
+                                    "margin": "sm",
+                                    "wrap": True
+                                }
+                            ]
+                        }
+                    }
+
+                    line_bot_api.reply_message(
+                        event.reply_token, 
+                        FlexSendMessage(alt_text="✅ Discord 網址設定成功", contents=success_card)
+                    )
+
+                except Exception as e:
+                    print(f"儲存錯誤: {e}")
+                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ 系統錯誤，請稍後再試"))
+                finally:
+                    conn.close()
+        return
+
+    # --- 功能：輸出 DC 網址 (精確觸發：必須剛好等於 "DC") ---
+    if msg == "DC":
+        conn = get_pg_conn()
+        url = None
+        if conn:
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT discord_url FROM settings WHERE group_id = %s", (source_id,))
+                row = cur.fetchone()
+                if row:
+                    url = row[0]
+                cur.close()
+            except Exception as e:
+                print(f"讀取錯誤: {e}")
+            finally:
+                conn.close()
+        
+        if url:
+            # 定義 Flex Message 卡片內容
+            flex_contents = {
+                "type": "bubble",
+                "body": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "Discord 伺服器",
+                            "weight": "bold",
+                            "size": "xl"
+                        },
+                        {
+                            "type": "text",
+                            "text": "點擊下方按鈕加入社群，與大家一起交流！",
+                            "size": "sm",
+                            "color": "#8c8c8c",
+                            "margin": "md",
+                            "wrap": True
+                        }
+                    ]
+                },
+                "footer": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "spacing": "sm",
+                    "contents": [
+                        {
+                            "type": "button",
+                            "style": "primary",
+                            "height": "sm",
+                            "color": "#5865F2", # Discord 經典藍
+                            "action": {
+                                "type": "uri",
+                                "label": "立即前往",
+                                "uri": url
+                            }
+                        }
+                    ]
+                }
+            }
+            
+            # 發送卡片
+            line_bot_api.reply_message(
+                event.reply_token,
+                FlexSendMessage(alt_text="Discord 邀請傳送門", contents=flex_contents)
+            )
+        else:
+            line_bot_api.reply_message(
+                event.reply_token, 
+                TextSendMessage(text="❌ 目前尚未設定網址。\n請輸入「設定DC [網址]」進行設定。")
+            )
+        return
+
+
+
+
 def handle_message(event):
     user = event.source.user_id
     user_id = event.source.user_id
@@ -2710,7 +2876,6 @@ def handle_message(event):
     db["boss"].setdefault(group_id, {})
     raw_text = event.message.text.strip()
     msg_text_no_space = raw_text.replace(" ", "")
-
 
     # --- 城堡財務功能 ---
     # 指令範例：稅收 10000 亞丁稅收
@@ -2753,6 +2918,8 @@ def handle_message(event):
         summary = get_finance_summary(group_id)
         send_finance_report(event, summary)
         return
+    
+
     #-------------------------------------------------------------競標---------------------------------------
     # 1. 發起：例如打「掉落 紅布」
     if text.startswith("掉落 "):
@@ -2972,6 +3139,7 @@ def handle_message(event):
         reply = build_roster_search_flex(keyword, result)
         line_bot_api.reply_message(event.reply_token, reply)
         return
+
 
 @app.get("/")
 def root():
