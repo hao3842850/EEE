@@ -1099,7 +1099,7 @@ def build_help_flex():
     )
 def build_join_roster_guide_flex():
     return FlexSendMessage(
-        alt_text="歡迎加入群組，請加入名冊",
+        alt_text="歡迎加入群組",
         contents={
             "type": "bubble",
             "size": "mega",
@@ -2671,15 +2671,7 @@ async def process_line_event(body: bytes, signature: str):
     except Exception as e:
         print("LINE 背景處理錯誤:", e)
 
-@handler.add(MemberJoinedEvent)
-def handle_member_joined(event):
-    # 只處理群組 / room
-    if event.source.type not in ["group", "room"]:
-        return
-    line_bot_api.reply_message(
-        event.reply_token,
-        build_join_roster_guide_flex()
-    )
+
 import re
 
 def sanitize_register_line(line: str) -> str:
