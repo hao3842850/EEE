@@ -140,9 +140,11 @@ def get_username(user_id):
 def get_pg_conn():
     try:
         conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+        # 開啟自動提交，確保每一筆寫入都會立刻進入資料庫，讓另一台機器人讀到
+        conn.autocommit = True 
         return conn
     except Exception as e:
-        print(f"Database connection failed: {e}")
+        print(f"❌ 資料庫連線失敗: {e}")
         return None
     
 def save_boss_to_pg(group_id, boss_name, kill_time, respawn_time, user_id, note, source="manual"):
@@ -1828,23 +1830,19 @@ def get_line_display_name(user_id):
         return profile.display_name
     except Exception:
         return None
+# 確保每次執行「查詢」指令時，都重新建立連線並讀取
 def query_roster(clan_name=None):
-    with get_pg_conn() as conn:
-        with conn.cursor() as cur:
-            if clan_name:
-                cur.execute("""
-                    SELECT game_name, clan_name, COALESCE(line_name, '') as line_name
-                    FROM roster
-                    WHERE clan_name = %s
-                    ORDER BY created_at
-                """, (clan_name,))
-            else:
-                cur.execute("""
-                    SELECT game_name, clan_name, COALESCE(line_name, '') as line_name
-                    FROM roster
-                    ORDER BY clan_name, created_at
-                """)
-            return cur.fetchall()
+    conn = get_pg_conn() # 每次都拿新連線
+    if not conn: return []
+    cur = conn.cursor()
+    if clan_name:
+        cur.execute("SELECT game_name, clan_name FROM roster WHERE clan_name = %s", (clan_name,))
+    else:
+        cur.execute("SELECT game_name, clan_name FROM roster")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close() # 查完就關閉，釋放連線給另一台機器人
+    return rows
 def search_roster(keyword):
     with get_pg_conn() as conn:
         with conn.cursor() as cur:
