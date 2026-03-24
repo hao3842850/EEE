@@ -2707,8 +2707,58 @@ def build_kpi_backup_text(kpi_db):
     return "\n".join(lines)
 #-------------------------------------------------------------****訊息判斷****---------------------------------------
 @handler.add(MessageEvent, message=TextMessage)
-
 def handle_message(event):
+    user = event.source.user_id
+    user_id = event.source.user_id
+    text = event.message.text.strip()
+    msg = text
+    db = load_db()
+    group_id = get_source_id(event)
+    db.setdefault("boss", {})
+    db["boss"].setdefault(group_id, {})
+
+    # --- 城堡財務功能 ---
+    # 指令範例：稅收 10000 亞丁稅收
+    if msg.startswith("收入") or msg.startswith("支出"):
+        parts = msg.split()
+        
+        # 1. 判定類型：強制使用 msg[0:2] 抓取最精準的字串
+        # 這樣可以避免因為空格或編碼導致 startswith 失敗
+        main_type = msg[0:2] 
+        
+        try:
+            amount = int(parts[1])
+            note = parts[2] if len(parts) > 2 else "無備註"
+            gid = event.source.group_id if event.source.type == 'group' else event.source.user_id
+            uid = event.source.user_id
+
+            # 2. 核心修正：
+            # 收入存正數，支出存負數
+            if main_type == "收入":
+                rtype = "收入"
+                save_amount = abs(amount)
+            else:
+                rtype = "支出"
+                save_amount = -abs(amount)
+
+            # 3. 儲存到資料庫
+            if save_finance_record(gid, rtype, save_amount, note, uid):
+                summary = get_finance_summary(gid)
+                # 呼叫 Flex Message (傳入金額與摘要)
+                flex_msg = get_finance_flex(rtype, abs(amount), note, summary)
+                line_bot_api.reply_message(event.reply_token, flex_msg)
+                
+        except (ValueError, IndexError):
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 格式錯誤"))
+        return
+
+    # 查詢指令
+    if msg == "城鑽" or msg == "財務報表":
+        group_id = get_source_id(event)
+        summary = get_finance_summary(group_id)
+        send_finance_report(event, summary)
+        return
+    
     msg = event.message.text.strip()
     # 取得群組或使用者 ID
     source_id = event.source.group_id if hasattr(event.source, 'group_id') else event.source.user_id
@@ -2843,72 +2893,6 @@ def handle_message(event):
                 TextSendMessage(text="❌ 目前尚未設定網址。\n請輸入「設定DC [網址]」進行設定。")
             )
         return
-
-
-
-
-def handle_message(event):
-    user = event.source.user_id
-    user_id = event.source.user_id
-    text = event.message.text.strip()
-    msg = text
-    raw_text = event.message.text.strip()
-    lines = raw_text.splitlines()
-    success_count = 0
-    failed_lines = []
-    # 在進入迴圈前，先定義好模式判斷
-    is_multi_register = len(lines) > 1
-    # 只有包含「📦」或「備份」字眼的多行訊息，才判定為靜音備份模式
-    is_backup_mode = is_multi_register and ("📦" in raw_text or "備份" in raw_text)
-    db = load_db()
-    group_id = get_source_id(event)
-    db.setdefault("boss", {})
-    db["boss"].setdefault(group_id, {})
-    raw_text = event.message.text.strip()
-    msg_text_no_space = raw_text.replace(" ", "")
-
-    # --- 城堡財務功能 ---
-    # 指令範例：稅收 10000 亞丁稅收
-    if msg.startswith("收入") or msg.startswith("支出"):
-        parts = msg.split()
-        
-        # 1. 判定類型：強制使用 msg[0:2] 抓取最精準的字串
-        # 這樣可以避免因為空格或編碼導致 startswith 失敗
-        main_type = msg[0:2] 
-        
-        try:
-            amount = int(parts[1])
-            note = parts[2] if len(parts) > 2 else "無備註"
-            gid = event.source.group_id if event.source.type == 'group' else event.source.user_id
-            uid = event.source.user_id
-
-            # 2. 核心修正：
-            # 收入存正數，支出存負數
-            if main_type == "收入":
-                rtype = "收入"
-                save_amount = abs(amount)
-            else:
-                rtype = "支出"
-                save_amount = -abs(amount)
-
-            # 3. 儲存到資料庫
-            if save_finance_record(gid, rtype, save_amount, note, uid):
-                summary = get_finance_summary(gid)
-                # 呼叫 Flex Message (傳入金額與摘要)
-                flex_msg = get_finance_flex(rtype, abs(amount), note, summary)
-                line_bot_api.reply_message(event.reply_token, flex_msg)
-                
-        except (ValueError, IndexError):
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 格式錯誤"))
-        return
-
-    # 查詢指令
-    if msg == "城鑽" or msg == "財務報表":
-        group_id = get_source_id(event)
-        summary = get_finance_summary(group_id)
-        send_finance_report(event, summary)
-        return
-    
 
     #-------------------------------------------------------------競標---------------------------------------
     # 1. 發起：例如打「掉落 紅布」
@@ -3129,7 +3113,6 @@ def handle_message(event):
         reply = build_roster_search_flex(keyword, result)
         line_bot_api.reply_message(event.reply_token, reply)
         return
-
 
 
 @app.get("/")
