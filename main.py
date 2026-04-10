@@ -2511,6 +2511,74 @@ def roster_delete(user_id):
                 (user_id,)
             )
         conn.commit()
+
+def get_tax_records():
+    """從資料庫獲取所有稅收明細"""
+    conn = get_pg_conn()
+    if not conn:
+        return []
+    try:
+        cur = conn.cursor()
+        # 假設資料表名稱為 tax_records，欄位包含日期(date)、金額(amount)、備註(note)
+        # 你可以根據實際 SQL 欄位調整這裡的語法
+        cur.execute("SELECT date, amount, note FROM tax_records ORDER BY date DESC LIMIT 10")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return rows
+    except Exception as e:
+        print(f"Error fetching tax: {e}")
+        return []
+
+def build_tax_flex(rows):
+    """將稅收數據轉換成 LINE Flex Message 格式"""
+    contents = []
+    for date, amount, note in rows:
+        # 每一列的結構
+        item = {
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+                {"type": "text", "text": str(date), "size": "sm", "color": "#555555", "flex": 2},
+                {"type": "text", "text": f"{amount:,}", "size": "sm", "align": "end", "weight": "bold", "flex": 2},
+                {"type": "text", "text": note, "size": "sm", "align": "end", "color": "#aaaaaa", "flex": 3}
+            ]
+        }
+        contents.append(item)
+        contents.append({"type": "separator", "margin": "md"})
+
+    bubble = {
+        "type": "bubble",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "💰 稅收明細表", "weight": "bold", "size": "xl", "color": "#ffffff"}
+            ],
+            "backgroundColor": "#27ACB9"
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "contents": [
+                        {"type": "text", "text": "日期", "size": "xs", "color": "#aaaaaa", "flex": 2},
+                        {"type": "text", "text": "金額", "size": "xs", "color": "#aaaaaa", "align": "end", "flex": 2},
+                        {"type": "text", "text": "備註", "size": "xs", "color": "#aaaaaa", "align": "end", "flex": 3}
+                    ]
+                },
+                {"type": "separator", "margin": "sm"},
+                *contents[:-1] # 放入剛才生成的內容，並去掉最後一個多餘的分隔線
+            ]
+        }
+    }
+    return bubble
+
+
+
 def save_finance_record(group_id, r_type, amount, note, user_id):
     conn = get_pg_conn()
     if not conn: return False
@@ -2717,6 +2785,20 @@ def handle_message(event):
     db.setdefault("boss", {})
     db["boss"].setdefault(group_id, {})
 
+
+    # 在 main.py 的 handle_message 內尋找其他的 if msg.startswith 邏輯區塊
+    if msg == "查詢稅收":
+        rows = get_tax_records()
+        if not rows:
+            reply = TextSendMessage(text="目前尚無稅收紀錄。")
+        else:
+            flex_contents = build_tax_flex(rows)
+            reply = FlexSendMessage(
+                alt_text="稅收明細查詢結果",
+                contents=flex_contents
+            )
+        line_bot_api.reply_message(event.reply_token, reply)
+        return
     # --- 城堡財務功能 ---
     # 指令範例：稅收 10000 亞丁稅收
     if msg.startswith("收入") or msg.startswith("支出"):
