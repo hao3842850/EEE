@@ -2539,60 +2539,111 @@ def get_castle_finance_records(group_id):
 
 
 def build_tax_list_flex(rows):
-    """建立稅收明細的卡片"""
+    """美化版稅收明細卡片 (已修正 Flex 格式與相容性)"""
     items_contents = []
     
     for row in rows:
-        created_at, record_type, amount, note, user_id = row
-        # 格式化日期為 MM/DD HH:MM
+        # 欄位：created_at, record_type, amount, note, user_id
+        created_at, r_type, amount, note, _ = row
+        
+        # 1. 處理時間顯示 (加入安全判斷，避免 naive datetime 報錯)
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
         date_str = created_at.astimezone(TZ).strftime('%m/%d %H:%M')
         
-        # 每一筆資料的佈局
+        # 2. 根據類型決定顏色
+        type_color = "#2ECC71" if "入" in str(r_type) else "#E74C3C"
+        type_label = str(r_type)[:2] 
+        
+        # 3. 每一筆明細的佈局
         item_box = {
             "type": "box",
-            "layout": "horizontal",
-            "margin": "md",
+            "layout": "vertical",
+            "margin": "lg",
             "contents": [
-                {"type": "text", "text": date_str, "size": "xs", "color": "#666666", "flex": 3},
-                {"type": "text", "text": f"{amount:,}", "size": "sm", "weight": "bold", "align": "end", "flex": 3},
-                {"type": "text", "text": note if note else "-", "size": "xs", "align": "end", "color": "#999999", "flex": 4, "wrap": True}
+                {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "contents": [
+                        # ✅ 修正：使用 box 容器來實作背景顏色與內距
+                        {
+                            "type": "box",
+                            "layout": "vertical",
+                            "backgroundColor": type_color,
+                            "cornerRadius": "sm",
+                            "paddingStart": "4px",
+                            "paddingEnd": "4px",
+                            "flex": 0,
+                            "justifyContent": "center",
+                            "contents": [
+                                {
+                                    "type": "text",
+                                    "text": type_label,
+                                    "size": "xs",
+                                    "color": "#ffffff",
+                                    "align": "center"
+                                }
+                            ]
+                        },
+                        # 日期
+                        {"type": "text", "text": date_str, "size": "xs", "color": "#888888", "margin": "md", "flex": 4},
+                        # 金額
+                        {"type": "text", "text": f"{amount:,} 💎", "size": "sm", "weight": "bold", "align": "end", "color": "#D4AF37", "flex": 5}
+                    ]
+                },
+                {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "margin": "sm",
+                    "contents": [
+                        # 備註內容
+                        {"type": "text", "text": f"📝 {note if note else '無備註'}", "size": "xs", "color": "#555555", "wrap": True, "flex": 1}
+                    ]
+                }
             ]
         }
         items_contents.append(item_box)
-        items_contents.append({"type": "separator", "margin": "md"})
+        items_contents.append({"type": "separator", "margin": "md", "color": "#EEEEEE"})
 
+    # ✅ 修正：改用傳統的 if-else 處理最後一條分隔線，提升系統相容性
+    if not items_contents:
+        final_contents = [{"type": "text", "text": "目前尚無資料", "align": "center", "color": "#aaaaaa"}]
+    else:
+        final_contents = items_contents[:-1]
+
+    # 4. 組合主體
     bubble = {
         "type": "bubble",
+        "styles": {"header": {"backgroundColor": "#2C3E50"}, "footer": {"separator": True}},
         "header": {
             "type": "box",
             "layout": "vertical",
-            "backgroundColor": "#8E44AD", # 使用紫色調作為財政區分
             "contents": [
-                {"type": "text", "text": "🏰 城堡稅收明細 (最近10筆)", "weight": "bold", "size": "md", "color": "#ffffff"}
+                {"type": "text", "text": "🏰 城堡財政明細", "weight": "bold", "size": "lg", "color": "#ffffff"},
+                {"type": "text", "text": "最近 10 筆收支紀錄", "size": "xs", "color": "#cccccc", "margin": "xs"}
             ]
         },
         "body": {
             "type": "box",
             "layout": "vertical",
+            "paddingAll": "15px",
+            "contents": final_contents
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
             "contents": [
-                # 欄位標題
                 {
-                    "type": "box",
-                    "layout": "horizontal",
-                    "contents": [
-                        {"type": "text", "text": "時間", "size": "xs", "color": "#aaaaaa", "flex": 3},
-                        {"type": "text", "text": "金額", "size": "xs", "color": "#aaaaaa", "align": "end", "flex": 3},
-                        {"type": "text", "text": "備註", "size": "xs", "color": "#aaaaaa", "align": "end", "flex": 4}
-                    ]
-                },
-                {"type": "separator", "margin": "sm"},
-                # 數據內容
-                *items_contents[:-1] # 排除最後一個多餘的分隔線
+                    "type": "text", 
+                    "text": f"查詢時間：{datetime.now(TZ).strftime('%Y-%m-%d %H:%M')}", 
+                    "size": "xxs", 
+                    "color": "#aaaaaa", 
+                    "align": "center"
+                }
             ]
         }
     }
-    return FlexSendMessage(alt_text="稅收明細表", contents=bubble)
-
+    return FlexSendMessage(alt_text="🏰 稅收明細表", contents=bubble)
 
 
 def save_finance_record(group_id, r_type, amount, note, user_id):
@@ -2803,7 +2854,7 @@ def handle_message(event):
 
 
     # 在 handle_message 內其他指令（如「名冊」）附近加入：
-    if msg == "查詢稅收":
+    if msg == "稅收明細":
         group_id = get_source_id(event)
         records = get_castle_finance_records(group_id)
         
