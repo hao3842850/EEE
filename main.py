@@ -2512,70 +2512,86 @@ def roster_delete(user_id):
             )
         conn.commit()
 
-def get_tax_records():
-    """從資料庫獲取所有稅收明細"""
+
+def get_castle_finance_records(group_id):
+    """從 castle_finance 資料表獲取該群組的稅收明細"""
     conn = get_pg_conn()
     if not conn:
         return []
     try:
         cur = conn.cursor()
-        # 假設資料表名稱為 tax_records，欄位包含日期(date)、金額(amount)、備註(note)
-        # 你可以根據實際 SQL 欄位調整這裡的語法
-        cur.execute("SELECT date, amount, note FROM tax_records ORDER BY date DESC LIMIT 10")
+        # 撈取最近 10 筆紀錄，包含日期、類型、金額與備註
+        query = """
+            SELECT created_at, record_type, amount, note, user_id
+            FROM castle_finance
+            WHERE group_id = %s
+            ORDER BY created_at DESC
+            LIMIT 10
+        """
+        cur.execute(query, (group_id,))
         rows = cur.fetchall()
         cur.close()
         conn.close()
         return rows
     except Exception as e:
-        print(f"Error fetching tax: {e}")
+        print(f"查詢稅收明細出錯: {e}")
         return []
 
-def build_tax_flex(rows):
-    """將稅收數據轉換成 LINE Flex Message 格式"""
-    contents = []
-    for date, amount, note in rows:
-        # 每一列的結構
-        item = {
+
+def build_tax_list_flex(rows):
+    """建立稅收明細的卡片"""
+    items_contents = []
+    
+    for row in rows:
+        created_at, record_type, amount, note, user_id = row
+        # 格式化日期為 MM/DD HH:MM
+        date_str = created_at.astimezone(TZ).strftime('%m/%d %H:%M')
+        
+        # 每一筆資料的佈局
+        item_box = {
             "type": "box",
             "layout": "horizontal",
+            "margin": "md",
             "contents": [
-                {"type": "text", "text": str(date), "size": "sm", "color": "#555555", "flex": 2},
-                {"type": "text", "text": f"{amount:,}", "size": "sm", "align": "end", "weight": "bold", "flex": 2},
-                {"type": "text", "text": note, "size": "sm", "align": "end", "color": "#aaaaaa", "flex": 3}
+                {"type": "text", "text": date_str, "size": "xs", "color": "#666666", "flex": 3},
+                {"type": "text", "text": f"{amount:,}", "size": "sm", "weight": "bold", "align": "end", "flex": 3},
+                {"type": "text", "text": note if note else "-", "size": "xs", "align": "end", "color": "#999999", "flex": 4, "wrap": True}
             ]
         }
-        contents.append(item)
-        contents.append({"type": "separator", "margin": "md"})
+        items_contents.append(item_box)
+        items_contents.append({"type": "separator", "margin": "md"})
 
     bubble = {
         "type": "bubble",
         "header": {
             "type": "box",
             "layout": "vertical",
+            "backgroundColor": "#8E44AD", # 使用紫色調作為財政區分
             "contents": [
-                {"type": "text", "text": "💰 稅收明細表", "weight": "bold", "size": "xl", "color": "#ffffff"}
-            ],
-            "backgroundColor": "#27ACB9"
+                {"type": "text", "text": "🏰 城堡稅收明細 (最近10筆)", "weight": "bold", "size": "md", "color": "#ffffff"}
+            ]
         },
         "body": {
             "type": "box",
             "layout": "vertical",
             "contents": [
+                # 欄位標題
                 {
                     "type": "box",
                     "layout": "horizontal",
                     "contents": [
-                        {"type": "text", "text": "日期", "size": "xs", "color": "#aaaaaa", "flex": 2},
-                        {"type": "text", "text": "金額", "size": "xs", "color": "#aaaaaa", "align": "end", "flex": 2},
-                        {"type": "text", "text": "備註", "size": "xs", "color": "#aaaaaa", "align": "end", "flex": 3}
+                        {"type": "text", "text": "時間", "size": "xs", "color": "#aaaaaa", "flex": 3},
+                        {"type": "text", "text": "金額", "size": "xs", "color": "#aaaaaa", "align": "end", "flex": 3},
+                        {"type": "text", "text": "備註", "size": "xs", "color": "#aaaaaa", "align": "end", "flex": 4}
                     ]
                 },
                 {"type": "separator", "margin": "sm"},
-                *contents[:-1] # 放入剛才生成的內容，並去掉最後一個多餘的分隔線
+                # 數據內容
+                *items_contents[:-1] # 排除最後一個多餘的分隔線
             ]
         }
     }
-    return bubble
+    return FlexSendMessage(alt_text="稅收明細表", contents=bubble)
 
 
 
@@ -2786,18 +2802,19 @@ def handle_message(event):
     db["boss"].setdefault(group_id, {})
 
 
-    # 在 main.py 的 handle_message 內尋找其他的 if msg.startswith 邏輯區塊
+    # 在 handle_message 內其他指令（如「名冊」）附近加入：
     if msg == "查詢稅收":
-        rows = get_tax_records()
-        if not rows:
-            reply = TextSendMessage(text="目前尚無稅收紀錄。")
-        else:
-            flex_contents = build_tax_flex(rows)
-            reply = FlexSendMessage(
-                alt_text="稅收明細查詢結果",
-                contents=flex_contents
+        group_id = get_source_id(event)
+        records = get_castle_finance_records(group_id)
+        
+        if not records:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="📊 目前尚無稅收紀錄。")
             )
-        line_bot_api.reply_message(event.reply_token, reply)
+        else:
+            flex_msg = build_tax_list_flex(records)
+            line_bot_api.reply_message(event.reply_token, flex_msg)
         return
     # --- 城堡財務功能 ---
     # 指令範例：稅收 10000 亞丁稅收
