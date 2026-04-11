@@ -2539,28 +2539,32 @@ def get_castle_finance_records(group_id):
 
 
 def build_tax_list_flex(rows):
-    """美化版稅收明細卡片 (新增右下角剩餘總額)"""
+    """美化版稅收明細卡片 (已修正剩餘計算邏輯)"""
     items_contents = []
-    total_balance = 0  # 用來計算剩餘稅收總額
+    total_income = 0
+    total_expense = 0
     
     for row in rows:
         # 欄位：created_at, record_type, amount, note, user_id
         created_at, r_type, amount, note, _ = row
         
-        # 計算總額邏輯：包含「入」字則加，否則減
-        if "入" in str(r_type):
-            total_balance += amount
+        # 判斷是收入還是支出，並累加總額
+        is_income = "入" in str(r_type)
+        if is_income:
+            total_income += amount
         else:
-            total_balance -= amount
+            total_expense += abs(amount)  # 確保支出累加的是正值
 
         # 1. 處理時間顯示
         if created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=timezone.utc)
         date_str = created_at.astimezone(TZ).strftime('%m/%d %H:%M')
         
-        # 2. 根據類型決定顏色
-        type_color = "#2ECC71" if "入" in str(r_type) else "#E74C3C"
+        # 2. 根據類型決定顏色與顯示金額
+        type_color = "#2ECC71" if is_income else "#E74C3C"
         type_label = str(r_type)[:2] 
+        # 為了顯示好看，無論收支，明細金額皆顯示正數
+        display_amount = abs(amount)
         
         # 3. 每一筆明細的佈局
         item_box = {
@@ -2591,10 +2595,9 @@ def build_tax_list_flex(rows):
                                 }
                             ]
                         },
-                        # 日期
                         {"type": "text", "text": date_str, "size": "xs", "color": "#888888", "margin": "md", "flex": 4},
-                        # 金額
-                        {"type": "text", "text": f"{amount:,} 💎", "size": "sm", "weight": "bold", "align": "end", "color": "#D4AF37", "flex": 5}
+                        # 顯示正數金額
+                        {"type": "text", "text": f"{display_amount:,} 💎", "size": "sm", "weight": "bold", "align": "end", "color": "#D4AF37", "flex": 5}
                     ]
                 },
                 {
@@ -2602,7 +2605,6 @@ def build_tax_list_flex(rows):
                     "layout": "horizontal",
                     "margin": "sm",
                     "contents": [
-                        # 備註內容
                         {"type": "text", "text": f"📝 {note if note else '無備註'}", "size": "xs", "color": "#555555", "wrap": True, "flex": 1}
                     ]
                 }
@@ -2611,12 +2613,14 @@ def build_tax_list_flex(rows):
         items_contents.append(item_box)
         items_contents.append({"type": "separator", "margin": "md", "color": "#EEEEEE"})
 
+    # 計算最終剩餘
+    total_balance = total_income - total_expense
+
     if not items_contents:
         final_contents = [{"type": "text", "text": "目前尚無資料", "align": "center", "color": "#aaaaaa"}]
     else:
         final_contents = items_contents[:-1]
 
-    # 4. 組合主體
     bubble = {
         "type": "bubble",
         "styles": {"header": {"backgroundColor": "#2C3E50"}, "footer": {"separator": True}},
@@ -2637,14 +2641,14 @@ def build_tax_list_flex(rows):
         "footer": {
             "type": "box",
             "layout": "vertical",
-            "spacing": "sm",
+            "spacing": "xs",
             "contents": [
-                # 新增：右下角剩餘稅收
+                # 右下角顯示剩餘稅收
                 {
                     "type": "box",
                     "layout": "horizontal",
                     "contents": [
-                        {"type": "text", "text": "目前剩餘稅收：", "size": "xs", "color": "#555555", "flex": 0},
+                        {"type": "text", "text": "⚖️ 目前剩餘稅收：", "size": "xs", "color": "#555555", "flex": 0},
                         {"type": "text", "text": f"{total_balance:,} 💎", "size": "sm", "weight": "bold", "color": "#D4AF37", "align": "end"}
                     ]
                 },
@@ -2653,7 +2657,8 @@ def build_tax_list_flex(rows):
                     "text": f"查詢時間：{datetime.now(TZ).strftime('%Y-%m-%d %H:%M')}", 
                     "size": "xxs", 
                     "color": "#aaaaaa", 
-                    "align": "center"
+                    "align": "center",
+                    "margin": "sm"
                 }
             ]
         }
