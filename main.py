@@ -2874,7 +2874,7 @@ def handle_message(event):
 
 
     # 在 handle_message 內其他指令（如「名冊」）附近加入：
-    if msg == "稅收明細":
+    if msg == "城鑽明細":
         group_id = get_source_id(event)
         records = get_castle_finance_records(group_id)
         
