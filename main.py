@@ -2539,14 +2539,21 @@ def get_castle_finance_records(group_id):
 
 
 def build_tax_list_flex(rows):
-    """美化版稅收明細卡片 (已修正 Flex 格式與相容性)"""
+    """美化版稅收明細卡片 (新增右下角剩餘總額)"""
     items_contents = []
+    total_balance = 0  # 用來計算剩餘稅收總額
     
     for row in rows:
         # 欄位：created_at, record_type, amount, note, user_id
         created_at, r_type, amount, note, _ = row
         
-        # 1. 處理時間顯示 (加入安全判斷，避免 naive datetime 報錯)
+        # 計算總額邏輯：包含「入」字則加，否則減
+        if "入" in str(r_type):
+            total_balance += amount
+        else:
+            total_balance -= amount
+
+        # 1. 處理時間顯示
         if created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=timezone.utc)
         date_str = created_at.astimezone(TZ).strftime('%m/%d %H:%M')
@@ -2565,7 +2572,6 @@ def build_tax_list_flex(rows):
                     "type": "box",
                     "layout": "horizontal",
                     "contents": [
-                        # ✅ 修正：使用 box 容器來實作背景顏色與內距
                         {
                             "type": "box",
                             "layout": "vertical",
@@ -2605,7 +2611,6 @@ def build_tax_list_flex(rows):
         items_contents.append(item_box)
         items_contents.append({"type": "separator", "margin": "md", "color": "#EEEEEE"})
 
-    # ✅ 修正：改用傳統的 if-else 處理最後一條分隔線，提升系統相容性
     if not items_contents:
         final_contents = [{"type": "text", "text": "目前尚無資料", "align": "center", "color": "#aaaaaa"}]
     else:
@@ -2632,7 +2637,17 @@ def build_tax_list_flex(rows):
         "footer": {
             "type": "box",
             "layout": "vertical",
+            "spacing": "sm",
             "contents": [
+                # 新增：右下角剩餘稅收
+                {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "contents": [
+                        {"type": "text", "text": "目前剩餘稅收：", "size": "xs", "color": "#555555", "flex": 0},
+                        {"type": "text", "text": f"{total_balance:,} 💎", "size": "sm", "weight": "bold", "color": "#D4AF37", "align": "end"}
+                    ]
+                },
                 {
                     "type": "text", 
                     "text": f"查詢時間：{datetime.now(TZ).strftime('%Y-%m-%d %H:%M')}", 
