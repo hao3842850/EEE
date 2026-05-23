@@ -2887,13 +2887,13 @@ def handle_message(event):
             flex_msg = build_tax_list_flex(records)
             line_bot_api.reply_message(event.reply_token, flex_msg)
         return
+'''
     # --- 城堡財務功能 ---
     # 指令範例：稅收 10000 亞丁稅收
     if msg.startswith("收入") or msg.startswith("支出"):
         parts = msg.split()
         
         # 1. 判定類型：強制使用 msg[0:2] 抓取最精準的字串
-        # 這樣可以避免因為空格或編碼導致 startswith 失敗
         main_type = msg[0:2] 
         
         try:
@@ -2921,6 +2921,7 @@ def handle_message(event):
         except (ValueError, IndexError):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ 格式錯誤"))
         return
+'''
 
     # 查詢指令
     if msg == "城鑽" or msg == "財務報表":
